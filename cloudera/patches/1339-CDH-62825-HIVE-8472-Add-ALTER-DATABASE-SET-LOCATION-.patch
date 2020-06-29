@@ -1,0 +1,499 @@
+From 92859ca2efd35a31095a21a0085a524c718b1db5 Mon Sep 17 00:00:00 2001
+From: Mithun RK <mithun@apache.org>
+Date: Mon, 7 Aug 2017 14:12:13 -0700
+Subject: [PATCH 1339/1431] CDH-62825: HIVE-8472: Add ALTER DATABASE SET
+ LOCATION (Mithun Radhakrishnan, reviewed by Alan
+ Gates)
+
+(cherry picked from commit f780eb39eea3f39b906daf7454185398b5d9ce3b)
+
+Change-Id: Iffe6f9fdc384bcdfe7a56608dc21f1d4f04f6305
+(cherry picked from commit e2af006c1ac0e18ddb27f7849cf5612658ab0b0b)
+---
+ .../hadoop/hive/metastore/TestHiveMetaStore.java   |   29 ++++++++++++
+ .../TestAuthorizationPreEventListener.java         |   19 +++++++-
+ .../hadoop/hive/metastore/HiveMetaStore.java       |   16 ++++++-
+ .../apache/hadoop/hive/metastore/ObjectStore.java  |    6 +++
+ .../metastore/events/PreAlterDatabaseEvent.java    |   47 ++++++++++++++++++++
+ .../hive/metastore/events/PreEventContext.java     |    3 +-
+ .../org/apache/hadoop/hive/ql/exec/DDLTask.java    |   20 +++++++++
+ .../hadoop/hive/ql/parse/DDLSemanticAnalyzer.java  |   11 +++++
+ .../org/apache/hadoop/hive/ql/parse/HiveParser.g   |    9 ++++
+ .../hive/ql/parse/SemanticAnalyzerFactory.java     |    2 +
+ .../hadoop/hive/ql/plan/AlterDatabaseDesc.java     |   19 +++++++-
+ .../apache/hadoop/hive/ql/plan/HiveOperation.java  |    1 +
+ .../AuthorizationPreEventListener.java             |   19 ++++++++
+ .../authorization/plugin/HiveOperationType.java    |    1 +
+ .../plugin/sqlstd/Operation2Privilege.java         |    2 +
+ 15 files changed, 198 insertions(+), 6 deletions(-)
+ create mode 100644 metastore/src/java/org/apache/hadoop/hive/metastore/events/PreAlterDatabaseEvent.java
+
+diff --git a/itests/hive-unit/src/test/java/org/apache/hadoop/hive/metastore/TestHiveMetaStore.java b/itests/hive-unit/src/test/java/org/apache/hadoop/hive/metastore/TestHiveMetaStore.java
+index ba59776..ef24ee6 100644
+--- a/itests/hive-unit/src/test/java/org/apache/hadoop/hive/metastore/TestHiveMetaStore.java
++++ b/itests/hive-unit/src/test/java/org/apache/hadoop/hive/metastore/TestHiveMetaStore.java
+@@ -19,6 +19,7 @@
+ package org.apache.hadoop.hive.metastore;
+ 
+ import java.lang.reflect.Field;
++import java.io.IOException;
+ import java.sql.Connection;
+ import java.sql.PreparedStatement;
+ import java.sql.SQLException;
+@@ -3058,6 +3059,34 @@ public void testGetTableObjects() throws Exception {
+     client.dropDatabase(dbName, true, true, true);
+   }
+ 
++  @Test
++  public void testDBLocationChange() throws IOException, TException {
++    final String dbName = "alterDbLocation";
++    String defaultUri = HiveConf.getVar(hiveConf, HiveConf.ConfVars.METASTOREWAREHOUSE) + "/default_location.db";
++    String newUri = HiveConf.getVar(hiveConf, HiveConf.ConfVars.METASTOREWAREHOUSE) + "/new_location.db";
++
++    Database db = new Database();
++    db.setName(dbName);
++    db.setLocationUri(defaultUri);
++    client.createDatabase(db);
++
++    db = client.getDatabase(dbName);
++
++    assertEquals("Incorrect default location of the database",
++        warehouse.getDnsPath(new Path(defaultUri)).toString(), db.getLocationUri());
++
++    db.setLocationUri(newUri);
++    client.alterDatabase(dbName, db);
++
++    db = client.getDatabase(dbName);
++
++    assertEquals("Incorrect new location of the database",
++        warehouse.getDnsPath(new Path(newUri)).toString(), db.getLocationUri());
++
++    client.dropDatabase(dbName);
++    silentDropDatabase(dbName);
++  }
++
+   private void checkDbOwnerType(String dbName, String ownerName, PrincipalType ownerType)
+       throws NoSuchObjectException, MetaException, TException {
+     Database db = client.getDatabase(dbName);
+diff --git a/itests/hive-unit/src/test/java/org/apache/hadoop/hive/ql/security/TestAuthorizationPreEventListener.java b/itests/hive-unit/src/test/java/org/apache/hadoop/hive/ql/security/TestAuthorizationPreEventListener.java
+index b8f5dd1..c064d9b 100644
+--- a/itests/hive-unit/src/test/java/org/apache/hadoop/hive/ql/security/TestAuthorizationPreEventListener.java
++++ b/itests/hive-unit/src/test/java/org/apache/hadoop/hive/ql/security/TestAuthorizationPreEventListener.java
+@@ -40,7 +40,7 @@
+ 
+ /**
+  * TestAuthorizationPreEventListener. Test case for
+- * {@link org.apache.hadoop.hive.metastore.AuthorizationPreEventListener} and
++ * {@link org.apache.hadoop.hive.ql.security.authorization.AuthorizationPreEventListener} and
+  * {@link org.apache.hadoop.hive.metastore.MetaStorePreEventListener}
+  */
+ public class TestAuthorizationPreEventListener extends TestCase {
+@@ -160,6 +160,10 @@ private void validateDropDb(Database expectedDb, Database actualDb) {
+     assertEquals(expectedDb, actualDb);
+   }
+ 
++  private void validateAlterDb(Database expectedDb, Database actualDb) {
++    assertEquals(expectedDb, actualDb);
++  }
++
+   public void testListener() throws Exception {
+     String dbName = "hive3705";
+     String tblName = "tmptbl";
+@@ -325,6 +329,19 @@ public void testListener() throws Exception {
+ 
+     validateDropTable(tCustom, table2FromDropTableEvent);
+ 
++    // Test ALTER DATABASE SET LOCATION.
++    String oldDatabaseLocation = db.getLocationUri();
++    String newDatabaseLocation = oldDatabaseLocation.replace(db.getName(), "new." + db.getName());
++    driver.run("ALTER DATABASE " + dbName + " SET LOCATION \"" + newDatabaseLocation + "\"");
++    listSize = authCalls.size();
++    Database dbFromAlterDatabaseEvent =
++        (Database)assertAndExtractSingleObjectFromEvent(listSize, authCalls,
++        DummyHiveMetastoreAuthorizationProvider.AuthCallContextType.DB);
++    validateAlterDb(db, dbFromAlterDatabaseEvent);
++    // Reset database location.
++    driver.run("ALTER DATABASE " + dbName + " SET LOCATION \"" + oldDatabaseLocation + "\"");
++
++    // Test DROP DATABASE.
+     driver.run("drop database " + dbName);
+     listSize = authCalls.size();
+     Database dbFromDropDatabaseEvent =
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java b/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java
+index c088ace..ee4d714 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java
+@@ -160,6 +160,7 @@
+ import org.apache.hadoop.hive.metastore.events.LoadPartitionDoneEvent;
+ import org.apache.hadoop.hive.metastore.events.PreAddIndexEvent;
+ import org.apache.hadoop.hive.metastore.events.PreAddPartitionEvent;
++import org.apache.hadoop.hive.metastore.events.PreAlterDatabaseEvent;
+ import org.apache.hadoop.hive.metastore.events.PreAlterIndexEvent;
+ import org.apache.hadoop.hive.metastore.events.PreAlterPartitionEvent;
+ import org.apache.hadoop.hive.metastore.events.PreAlterTableEvent;
+@@ -1053,13 +1054,24 @@ public Database get_database_core(final String name) throws NoSuchObjectExceptio
+     }
+ 
+     @Override
+-    public void alter_database(final String dbName, final Database db)
++    public void alter_database(final String dbName, final Database newDB)
+         throws NoSuchObjectException, TException, MetaException {
+       startFunction("alter_database" + dbName);
+       boolean success = false;
+       Exception ex = null;
++
++      // Perform the same URI normalization as create_database_core.
++      if (newDB.getLocationUri() != null) {
++        newDB.setLocationUri(wh.getDnsPath(new Path(newDB.getLocationUri())).toString());
++      }
++
+       try {
+-        getMS().alterDatabase(dbName, db);
++        Database oldDB = get_database_core(dbName);
++        if (oldDB == null) {
++          throw new MetaException("Could not alter database \"" + dbName + "\". Could not retrieve old definition.");
++        }
++        firePreEvent(new PreAlterDatabaseEvent(oldDB, newDB, this));
++        getMS().alterDatabase(dbName, newDB);
+         success = true;
+       } catch (Exception e) {
+         ex = e;
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/ObjectStore.java b/metastore/src/java/org/apache/hadoop/hive/metastore/ObjectStore.java
+index c7ed2ee..c712f17 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/ObjectStore.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/ObjectStore.java
+@@ -689,6 +689,12 @@ public boolean alterDatabase(String dbName, Database db)
+       if (db.getOwnerType() != null) {
+         mdb.setOwnerType(db.getOwnerType().name());
+       }
++      if (org.apache.commons.lang.StringUtils.isNotBlank(db.getDescription())) {
++        mdb.setDescription(db.getDescription());
++      }
++      if (org.apache.commons.lang.StringUtils.isNotBlank(db.getLocationUri())) {
++        mdb.setLocationUri(db.getLocationUri());
++      }
+       openTransaction();
+       pm.makePersistent(mdb);
+       committed = commitTransaction();
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/events/PreAlterDatabaseEvent.java b/metastore/src/java/org/apache/hadoop/hive/metastore/events/PreAlterDatabaseEvent.java
+new file mode 100644
+index 0000000..62e2674
+--- /dev/null
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/events/PreAlterDatabaseEvent.java
+@@ -0,0 +1,47 @@
++/**
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.hadoop.hive.metastore.events;
++
++import org.apache.hadoop.hive.metastore.HiveMetaStore.HMSHandler;
++import org.apache.hadoop.hive.metastore.api.Database;
++
++public class PreAlterDatabaseEvent extends PreEventContext {
++
++  private final Database oldDB, newDB;
++
++  public PreAlterDatabaseEvent(Database oldDB, Database newDB, HMSHandler handler) {
++    super (PreEventType.ALTER_DATABASE, handler);
++    this.oldDB = oldDB;
++    this.newDB = newDB;
++  }
++
++  /**
++   * @return the old db
++   */
++  public Database getOldDatabase () {
++    return oldDB;
++  }
++
++  /**
++   * @return the new db
++   */
++  public Database getNewDatabase() {
++    return newDB;
++  }
++}
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/events/PreEventContext.java b/metastore/src/java/org/apache/hadoop/hive/metastore/events/PreEventContext.java
+index d61e0f4..0bd2ea6 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/events/PreEventContext.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/events/PreEventContext.java
+@@ -45,7 +45,8 @@
+     READ_DATABASE,
+     ADD_INDEX,
+     ALTER_INDEX,
+-    DROP_INDEX
++    DROP_INDEX,
++    ALTER_DATABASE
+   }
+ 
+   private final PreEventType eventType;
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/DDLTask.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/DDLTask.java
+index 884fe11..38349c8 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/DDLTask.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/DDLTask.java
+@@ -785,6 +785,26 @@ private int alterDatabase(AlterDatabaseDesc alterDbDesc) throws HiveException {
+       database.setOwnerType(alterDbDesc.getOwnerPrincipal().getType());
+       break;
+ 
++    case ALTER_LOCATION:
++      try {
++        String newLocation = alterDbDesc.getLocation();
++        URI locationURI = new URI(newLocation);
++        if (   !locationURI.isAbsolute()
++            || StringUtils.isBlank(locationURI.getScheme())) {
++          throw new HiveException(ErrorMsg.BAD_LOCATION_VALUE, newLocation);
++        }
++        if (newLocation.equals(database.getLocationUri())) {
++          LOG.info("AlterDatabase skipped. No change in location.");
++        }
++        else {
++          database.setLocationUri(newLocation);
++        }
++      }
++      catch (URISyntaxException e) {
++        throw new HiveException(e);
++      }
++      break;
++
+     default:
+       throw new AssertionError("Unsupported alter database type! : " + alterDbDesc.getAlterType());
+     }
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/parse/DDLSemanticAnalyzer.java b/ql/src/java/org/apache/hadoop/hive/ql/parse/DDLSemanticAnalyzer.java
+index bc4ec01..26c2b11 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/parse/DDLSemanticAnalyzer.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/parse/DDLSemanticAnalyzer.java
+@@ -436,6 +436,9 @@ public void analyzeInternal(ASTNode input) throws SemanticException {
+     case HiveParser.TOK_ALTERDATABASE_OWNER:
+       analyzeAlterDatabaseOwner(ast);
+       break;
++    case HiveParser.TOK_ALTERDATABASE_LOCATION:
++      analyzeAlterDatabaseLocation(ast);
++      break;
+     case HiveParser.TOK_CREATEROLE:
+       analyzeCreateRole(ast);
+       break;
+@@ -661,6 +664,14 @@ private void analyzeAlterDatabaseOwner(ASTNode ast) throws SemanticException {
+     addAlterDbDesc(alterDesc);
+   }
+ 
++  private void analyzeAlterDatabaseLocation(ASTNode ast) throws SemanticException {
++    String dbName = getUnescapedName((ASTNode) ast.getChild(0));
++    String newLocation = unescapeSQLString(ast.getChild(1).getText());
++    addLocationToOutputs(newLocation);
++    AlterDatabaseDesc alterDesc = new AlterDatabaseDesc(dbName, newLocation);
++    addAlterDbDesc(alterDesc);
++  }
++
+   private void analyzeExchangePartition(String[] qualified, ASTNode ast) throws SemanticException {
+     Table destTable = getTable(qualified);
+     Table sourceTable = getTable(getUnescapedName((ASTNode)ast.getChild(1)));
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/parse/HiveParser.g b/ql/src/java/org/apache/hadoop/hive/ql/parse/HiveParser.g
+index ec53182..63407ae 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/parse/HiveParser.g
++++ b/ql/src/java/org/apache/hadoop/hive/ql/parse/HiveParser.g
+@@ -301,6 +301,7 @@ TOK_DATABASELOCATION;
+ TOK_DBPROPLIST;
+ TOK_ALTERDATABASE_PROPERTIES;
+ TOK_ALTERDATABASE_OWNER;
++TOK_ALTERDATABASE_LOCATION;
+ TOK_TABNAME;
+ TOK_TABSRC;
+ TOK_RESTRICT;
+@@ -1035,6 +1036,7 @@ alterDatabaseStatementSuffix
+ @after { popMsg(state); }
+     : alterDatabaseSuffixProperties
+     | alterDatabaseSuffixSetOwner
++    | alterDatabaseSuffixSetLocation
+     ;
+ 
+ alterDatabaseSuffixProperties
+@@ -1051,6 +1053,13 @@ alterDatabaseSuffixSetOwner
+     -> ^(TOK_ALTERDATABASE_OWNER $dbName principalName)
+     ;
+ 
++alterDatabaseSuffixSetLocation
++@init { pushMsg("alter database set location", state); }
++@after { popMsg(state); }
++    : dbName=identifier KW_SET KW_LOCATION newLocation=StringLiteral
++    -> ^(TOK_ALTERDATABASE_LOCATION $dbName $newLocation)
++    ;
++
+ alterStatementSuffixRename[boolean table]
+ @init { pushMsg("rename statement", state); }
+ @after { popMsg(state); }
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/parse/SemanticAnalyzerFactory.java b/ql/src/java/org/apache/hadoop/hive/ql/parse/SemanticAnalyzerFactory.java
+index e21c34f..0e635f5 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/parse/SemanticAnalyzerFactory.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/parse/SemanticAnalyzerFactory.java
+@@ -107,6 +107,7 @@
+     commandType.put(HiveParser.TOK_SHOW_ROLE_GRANT, HiveOperation.SHOW_ROLE_GRANT);
+     commandType.put(HiveParser.TOK_ALTERDATABASE_PROPERTIES, HiveOperation.ALTERDATABASE);
+     commandType.put(HiveParser.TOK_ALTERDATABASE_OWNER, HiveOperation.ALTERDATABASE_OWNER);
++    commandType.put(HiveParser.TOK_ALTERDATABASE_LOCATION, HiveOperation.ALTERDATABASE_LOCATION);
+     commandType.put(HiveParser.TOK_DESCDATABASE, HiveOperation.DESCDATABASE);
+     commandType.put(HiveParser.TOK_ALTERTABLE_SKEWED, HiveOperation.ALTERTABLE_SKEWED);
+     commandType.put(HiveParser.TOK_ANALYZE, HiveOperation.ANALYZE_TABLE);
+@@ -256,6 +257,7 @@ public static BaseSemanticAnalyzer get(HiveConf conf, ASTNode tree)
+       case HiveParser.TOK_SHOW_ROLES:
+       case HiveParser.TOK_ALTERDATABASE_PROPERTIES:
+       case HiveParser.TOK_ALTERDATABASE_OWNER:
++      case HiveParser.TOK_ALTERDATABASE_LOCATION:
+       case HiveParser.TOK_TRUNCATETABLE:
+       case HiveParser.TOK_SHOW_SET_ROLE:
+         return new DDLSemanticAnalyzer(conf);
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/plan/AlterDatabaseDesc.java b/ql/src/java/org/apache/hadoop/hive/ql/plan/AlterDatabaseDesc.java
+index e45bc26..c7e8b0c 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/plan/AlterDatabaseDesc.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/plan/AlterDatabaseDesc.java
+@@ -32,13 +32,14 @@
+ 
+   // Only altering the database property and owner is currently supported
+   public static enum ALTER_DB_TYPES {
+-    ALTER_PROPERTY, ALTER_OWNER
++    ALTER_PROPERTY, ALTER_OWNER, ALTER_LOCATION
+   };
+ 
+   ALTER_DB_TYPES alterType;
+   String databaseName;
+   Map<String, String> dbProperties;
+   PrincipalDesc ownerPrincipal;
++  String location;
+ 
+   /**
+    * For serialization only.
+@@ -49,7 +50,7 @@ public AlterDatabaseDesc() {
+   public AlterDatabaseDesc(String databaseName, Map<String, String> dbProps) {
+     super();
+     this.databaseName = databaseName;
+-    this.dbProperties = dbProps;
++    this.setDatabaseProperties(dbProps);
+     this.setAlterType(ALTER_DB_TYPES.ALTER_PROPERTY);
+   }
+ 
+@@ -59,6 +60,12 @@ public AlterDatabaseDesc(String databaseName, PrincipalDesc ownerPrincipal) {
+     this.setAlterType(ALTER_DB_TYPES.ALTER_OWNER);
+   }
+ 
++  public AlterDatabaseDesc(String databaseName, String newLocation) {
++    this.databaseName = databaseName;
++    this.setLocation(newLocation);
++    this.setAlterType(ALTER_DB_TYPES.ALTER_LOCATION);
++  }
++
+   @Explain(displayName="properties")
+   public Map<String, String> getDatabaseProperties() {
+     return dbProperties;
+@@ -86,6 +93,14 @@ public void setOwnerPrincipal(PrincipalDesc ownerPrincipal) {
+     this.ownerPrincipal = ownerPrincipal;
+   }
+ 
++  @Explain(displayName="location")
++  public String getLocation() {
++    return location;
++  }
++
++  public void setLocation(String location) {
++    this.location = location;
++  }
+   public ALTER_DB_TYPES getAlterType() {
+     return alterType;
+   }
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/plan/HiveOperation.java b/ql/src/java/org/apache/hadoop/hive/ql/plan/HiveOperation.java
+index 65cc70a..0ba26d3 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/plan/HiveOperation.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/plan/HiveOperation.java
+@@ -107,6 +107,7 @@
+   ALTERINDEX_PROPS("ALTERINDEX_PROPS",null, null),
+   ALTERDATABASE("ALTERDATABASE", null, null),
+   ALTERDATABASE_OWNER("ALTERDATABASE_OWNER", null, null),
++  ALTERDATABASE_LOCATION("ALTERDATABASE_LOCATION", new Privilege[]{Privilege.ALTER_DATA}, null),
+   DESCDATABASE("DESCDATABASE", null, null),
+   ALTERTABLE_MERGEFILES("ALTER_TABLE_MERGE", new Privilege[] { Privilege.SELECT }, new Privilege[] { Privilege.ALTER_DATA }),
+   ALTERPARTITION_MERGEFILES("ALTER_PARTITION_MERGE", new Privilege[] { Privilege.SELECT }, new Privilege[] { Privilege.ALTER_DATA }),
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/AuthorizationPreEventListener.java b/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/AuthorizationPreEventListener.java
+index 2262ccb..23d7633 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/AuthorizationPreEventListener.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/AuthorizationPreEventListener.java
+@@ -34,6 +34,7 @@
+ import org.apache.hadoop.hive.metastore.api.MetaException;
+ import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
+ import org.apache.hadoop.hive.metastore.events.PreAddPartitionEvent;
++import org.apache.hadoop.hive.metastore.events.PreAlterDatabaseEvent;
+ import org.apache.hadoop.hive.metastore.events.PreAlterPartitionEvent;
+ import org.apache.hadoop.hive.metastore.events.PreAlterTableEvent;
+ import org.apache.hadoop.hive.metastore.events.PreCreateDatabaseEvent;
+@@ -159,6 +160,9 @@ public void onEvent(PreEventContext context) throws MetaException, NoSuchObjectE
+     case CREATE_DATABASE:
+       authorizeCreateDatabase((PreCreateDatabaseEvent)context);
+       break;
++    case ALTER_DATABASE:
++        authorizeAlterDatabase((PreAlterDatabaseEvent) context);
++        break;
+     case DROP_DATABASE:
+       authorizeDropDatabase((PreDropDatabaseEvent)context);
+       break;
+@@ -253,6 +257,21 @@ private void authorizeDropDatabase(PreDropDatabaseEvent context)
+     }
+   }
+ 
++  private void authorizeAlterDatabase(PreAlterDatabaseEvent context)
++      throws InvalidOperationException, MetaException {
++    try {
++      for (HiveMetastoreAuthorizationProvider authorizer : tAuthorizers.get()) {
++        authorizer.authorize(new Database(context.getOldDatabase()),
++            HiveOperation.ALTERDATABASE_LOCATION.getInputRequiredPrivileges(),
++            HiveOperation.ALTERDATABASE_LOCATION.getOutputRequiredPrivileges());
++      }
++    } catch (AuthorizationException e) {
++      throw invalidOperationException(e);
++    } catch (HiveException e) {
++      throw metaException(e);
++    }
++  }
++
+   private void authorizeCreateTable(PreCreateTableEvent context)
+       throws InvalidOperationException, MetaException {
+     try {
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/plugin/HiveOperationType.java b/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/plugin/HiveOperationType.java
+index 4b17461..3a2b709 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/plugin/HiveOperationType.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/plugin/HiveOperationType.java
+@@ -109,6 +109,7 @@
+   ALTERINDEX_PROPS,
+   ALTERDATABASE,
+   ALTERDATABASE_OWNER,
++  ALTERDATABASE_LOCATION,
+   DESCDATABASE,
+   ALTERTABLE_MERGEFILES,
+   ALTERPARTITION_MERGEFILES,
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/plugin/sqlstd/Operation2Privilege.java b/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/plugin/sqlstd/Operation2Privilege.java
+index 42e50ff..a6cfd07 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/plugin/sqlstd/Operation2Privilege.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/plugin/sqlstd/Operation2Privilege.java
+@@ -352,6 +352,8 @@ public HivePrivilegeObjectType getObjectType() {
+ (null, ADMIN_PRIV_AR));
+     op2Priv.put(HiveOperationType.ALTERDATABASE_OWNER, PrivRequirement.newIOPrivRequirement
+ (null, ADMIN_PRIV_AR));
++    op2Priv.put(HiveOperationType.ALTERDATABASE_LOCATION, PrivRequirement.newIOPrivRequirement
++(null, ADMIN_PRIV_AR));
+     op2Priv.put(HiveOperationType.DESCDATABASE, PrivRequirement.newIOPrivRequirement
+ (null, null));
+     op2Priv.put(HiveOperationType.DFS, PrivRequirement.newIOPrivRequirement
+-- 
+1.7.9.5
+

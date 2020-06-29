@@ -1,0 +1,42 @@
+From cce03a12a95b188c1a03d1de12ef19ddb9033b7d Mon Sep 17 00:00:00 2001
+From: Naveen Gangam <ngangam@cloudera.com>
+Date: Tue, 1 May 2018 15:21:17 -0400
+Subject: [PATCH 1379/1431] CDH-65448: HIVE-19231 : Beeline generates garbled
+ output when using UnsupportedTerminal (Naveen
+ Gangam, reviewed by Aihua)
+
+Change-Id: I9f829705753f9aa51d9cc8a95d897d721596c235
+---
+ bin/beeline    |    2 +-
+ bin/ext/cli.sh |    2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/bin/beeline b/bin/beeline
+index 8f4484c..604d744 100644
+--- a/bin/beeline
++++ b/bin/beeline
+@@ -23,7 +23,7 @@ bin=`cd "$bin"; pwd`
+ export HADOOP_USER_CLASSPATH_FIRST=true
+ 
+ # If process is backgrounded, don't change terminal settings
+-if [[ ( ! $(ps -o stat= -p $$) =~ "+" ) && ! ( -p /dev/stdin ) ]]; then
++if [[ ( ! $(ps -o stat= -p $$) =~ "+" ) && ! ( -p /dev/stdin ) && ( ! $(ps -o tty= -p $$) =~ "?" ) ]]; then
+   export HADOOP_CLIENT_OPTS="$HADOOP_CLIENT_OPTS -Djline.terminal=jline.UnsupportedTerminal"
+ fi
+ 
+diff --git a/bin/ext/cli.sh b/bin/ext/cli.sh
+index 554129b..c863fe5 100644
+--- a/bin/ext/cli.sh
++++ b/bin/ext/cli.sh
+@@ -24,7 +24,7 @@ fi
+ 
+ updateBeelineOpts() {
+   # If process is backgrounded, don't change terminal settings
+-  if [[ ( ! $(ps -o stat= -p $$) =~ *+ ) && ! ( -p /dev/stdin ) ]]; then
++  if [[ ( ! $(ps -o stat= -p $$) =~ *+ ) && ! ( -p /dev/stdin ) && ( ! $(ps -o tty= -p $$) =~ "?" ) ]]; then
+     export HADOOP_CLIENT_OPTS="$HADOOP_CLIENT_OPTS -Djline.terminal=jline.UnsupportedTerminal"
+   fi
+ }
+-- 
+1.7.9.5
+

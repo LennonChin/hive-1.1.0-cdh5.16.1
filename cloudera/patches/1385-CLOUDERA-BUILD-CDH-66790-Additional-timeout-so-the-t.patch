@@ -1,0 +1,29 @@
+From da634cc9753ab0ef2aec05aaa77ae01844f2c5ec Mon Sep 17 00:00:00 2001
+From: Peter Vary <pvary@cloudera.com>
+Date: Fri, 4 May 2018 14:36:02 +0200
+Subject: [PATCH 1385/1431] CLOUDERA-BUILD: CDH-66790: Additional timeout, so
+ the tests will not fail
+
+Change-Id: Id896452cfd7039e6be97086a6384f57a6b3c2427
+(cherry picked from commit ab62b5646cdb35de563060b4dd34af08e3ed8d82)
+(cherry picked from commit bfb7e47e72e533474c06f6b3b4564355f390d901)
+---
+ .../minikdc/TestJdbcWithDBTokenStoreNoDoAs.java    |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/itests/hive-minikdc/src/test/java/org/apache/hive/minikdc/TestJdbcWithDBTokenStoreNoDoAs.java b/itests/hive-minikdc/src/test/java/org/apache/hive/minikdc/TestJdbcWithDBTokenStoreNoDoAs.java
+index d16ce2c..efdaa13 100644
+--- a/itests/hive-minikdc/src/test/java/org/apache/hive/minikdc/TestJdbcWithDBTokenStoreNoDoAs.java
++++ b/itests/hive-minikdc/src/test/java/org/apache/hive/minikdc/TestJdbcWithDBTokenStoreNoDoAs.java
+@@ -57,6 +57,6 @@ public static void beforeTest() throws Exception {
+     // tests original intention, so keep everything as it was originally.
+ //    System.setProperty(HiveConf.ConfVars.METASTOREURIS.varname,
+ //        HiveConf.getVar(hiveConf, HiveConf.ConfVars.METASTOREURIS));
+-    Thread.sleep(2000);
++    Thread.sleep(4000);
+   }
+ }
+\ No newline at end of file
+-- 
+1.7.9.5
+

@@ -1,0 +1,1212 @@
+From 70d456e004ddff3311668ecd54fa5a1d0d0b420a Mon Sep 17 00:00:00 2001
+From: Alan Gates <gates@hortonworks.com>
+Date: Mon, 18 Dec 2017 14:27:13 -0800
+Subject: [PATCH 1340/1431] CDH-62825: HIVE-17981 Create a set of builders for
+ Thrift classes.  This closes #274.  (Alan Gates,
+ reviewed by Peter Vary)
+
+(cherry picked from commit 12a33fd0d1f82422048af5a389671812bdf03c93)
+
+Change-Id: I7c338f99fbe638785ba4af48061fe269b2feb3ca
+---
+ .../client/builder/ConstraintBuilder.java          |   98 +++++++++
+ .../metastore/client/builder/DatabaseBuilder.java  |   89 +++++++++
+ .../GrantRevokePrivilegeRequestBuilder.java        |   63 ++++++
+ .../client/builder/HiveObjectPrivilegeBuilder.java |   63 ++++++
+ .../metastore/client/builder/IndexBuilder.java     |  104 ++++++++++
+ .../metastore/client/builder/PartitionBuilder.java |  102 ++++++++++
+ .../client/builder/PrivilegeGrantInfoBuilder.java  |   84 ++++++++
+ .../hive/metastore/client/builder/RoleBuilder.java |   55 +++++
+ .../client/builder/StorageDescriptorBuilder.java   |  210 ++++++++++++++++++++
+ .../metastore/client/builder/TableBuilder.java     |  156 +++++++++++++++
+ .../hadoop/hive/metastore/utils/SecurityUtils.java |   84 ++++++++
+ 11 files changed, 1108 insertions(+)
+ create mode 100644 metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/ConstraintBuilder.java
+ create mode 100644 metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/DatabaseBuilder.java
+ create mode 100644 metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/GrantRevokePrivilegeRequestBuilder.java
+ create mode 100644 metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/HiveObjectPrivilegeBuilder.java
+ create mode 100644 metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/IndexBuilder.java
+ create mode 100644 metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/PartitionBuilder.java
+ create mode 100644 metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/PrivilegeGrantInfoBuilder.java
+ create mode 100644 metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/RoleBuilder.java
+ create mode 100644 metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/StorageDescriptorBuilder.java
+ create mode 100644 metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/TableBuilder.java
+ create mode 100644 metastore/src/java/org/apache/hadoop/hive/metastore/utils/SecurityUtils.java
+
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/ConstraintBuilder.java b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/ConstraintBuilder.java
+new file mode 100644
+index 0000000..50e779a
+--- /dev/null
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/ConstraintBuilder.java
+@@ -0,0 +1,98 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ * <p>
++ * http://www.apache.org/licenses/LICENSE-2.0
++ * <p>
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.hadoop.hive.metastore.client.builder;
++
++import org.apache.hadoop.hive.metastore.api.MetaException;
++import org.apache.hadoop.hive.metastore.api.Table;
++
++/**
++ * Base builder for all types of constraints.  Database name, table name, and column name
++ * must be provided.
++ * @param <T> Type of builder extending this.
++ */
++abstract class ConstraintBuilder<T> {
++  protected String dbName, tableName, columnName, constraintName;
++  protected int keySeq;
++  protected boolean enable, validate, rely;
++  private T child;
++
++  protected ConstraintBuilder() {
++    keySeq = 1;
++    enable = true;
++    validate = rely = false;
++  }
++
++  protected void setChild(T child) {
++    this.child = child;
++  }
++
++  protected void checkBuildable(String defaultConstraintName) throws MetaException {
++    if (dbName == null || tableName == null || columnName == null) {
++      throw new MetaException("You must provide database name, table name, and column name");
++    }
++    if (constraintName == null) {
++      constraintName = dbName + "_" + tableName + "_" + columnName + "_" + defaultConstraintName;
++    }
++  }
++
++  public T setDbName(String dbName) {
++    this.dbName = dbName;
++    return child;
++  }
++
++  public T setTableName(String tableName) {
++    this.tableName = tableName;
++    return child;
++  }
++
++  public T setDbAndTableName(Table table) {
++    this.dbName = table.getDbName();
++    this.tableName = table.getTableName();
++    return child;
++  }
++
++  public T setColumnName(String columnName) {
++    this.columnName = columnName;
++    return child;
++  }
++
++  public T setConstraintName(String constraintName) {
++    this.constraintName = constraintName;
++    return child;
++  }
++
++  public T setKeySeq(int keySeq) {
++    this.keySeq = keySeq;
++    return child;
++  }
++
++  public T setEnable(boolean enable) {
++    this.enable = enable;
++    return child;
++  }
++
++  public T setValidate(boolean validate) {
++    this.validate = validate;
++    return child;
++  }
++
++  public T setRely(boolean rely) {
++    this.rely = rely;
++    return child;
++  }
++}
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/DatabaseBuilder.java b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/DatabaseBuilder.java
+new file mode 100644
+index 0000000..f7274f1
+--- /dev/null
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/DatabaseBuilder.java
+@@ -0,0 +1,89 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ * <p>
++ * http://www.apache.org/licenses/LICENSE-2.0
++ * <p>
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.hadoop.hive.metastore.client.builder;
++
++import org.apache.hadoop.hive.metastore.MetaStoreUtils;
++import org.apache.hadoop.hive.metastore.api.Database;
++import org.apache.hadoop.hive.metastore.api.MetaException;
++import org.apache.hadoop.hive.metastore.api.PrincipalType;
++import org.apache.hadoop.hive.metastore.utils.SecurityUtils;
++import org.apache.thrift.TException;
++
++import java.io.IOException;
++import java.util.HashMap;
++import java.util.Map;
++
++/**
++ * A builder for {@link Database}.  The name of the new database is required.  Everything else
++ * selects reasonable defaults.
++ */
++public class DatabaseBuilder {
++  private String name, description, location;
++  private Map<String, String> params = new HashMap<>();
++  private String ownerName;
++  private PrincipalType ownerType;
++
++  public DatabaseBuilder setName(String name) {
++    this.name = name;
++    return this;
++  }
++
++  public DatabaseBuilder setDescription(String description) {
++    this.description = description;
++    return this;
++  }
++
++  public DatabaseBuilder setLocation(String location) {
++    this.location = location;
++    return this;
++  }
++
++  public DatabaseBuilder setParams(Map<String, String> params) {
++    this.params = params;
++    return this;
++  }
++
++  public DatabaseBuilder addParam(String key, String value) {
++    params.put(key, value);
++    return this;
++  }
++
++  public DatabaseBuilder setOwnerName(String ownerName) {
++    this.ownerName = ownerName;
++    return this;
++  }
++
++  public DatabaseBuilder setOwnerType(PrincipalType ownerType) {
++    this.ownerType = ownerType;
++    return this;
++  }
++
++  public Database build() throws TException {
++    if (name == null) throw new MetaException("You must name the database");
++    Database db = new Database(name, description, location, params);
++    try {
++      if (ownerName != null) ownerName = SecurityUtils.getUser();
++      db.setOwnerName(ownerName);
++      if (ownerType == null) ownerType = PrincipalType.USER;
++      db.setOwnerType(ownerType);
++      return db;
++    } catch (IOException e) {
++      throw MetaStoreUtils.newMetaException(e);
++    }
++  }
++}
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/GrantRevokePrivilegeRequestBuilder.java b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/GrantRevokePrivilegeRequestBuilder.java
+new file mode 100644
+index 0000000..26cea19
+--- /dev/null
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/GrantRevokePrivilegeRequestBuilder.java
+@@ -0,0 +1,63 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ * <p>
++ * http://www.apache.org/licenses/LICENSE-2.0
++ * <p>
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.hadoop.hive.metastore.client.builder;
++
++import org.apache.hadoop.hive.metastore.api.GrantRevokePrivilegeRequest;
++import org.apache.hadoop.hive.metastore.api.GrantRevokeType;
++import org.apache.hadoop.hive.metastore.api.HiveObjectPrivilege;
++import org.apache.hadoop.hive.metastore.api.MetaException;
++import org.apache.hadoop.hive.metastore.api.PrivilegeBag;
++
++/**
++ * A builder for {@link GrantRevokePrivilegeRequest}.  The revoke of grant option defaults to
++ * false.  The request Type and the privileges must be provided.
++ */
++public class GrantRevokePrivilegeRequestBuilder {
++  private GrantRevokeType requestType;
++  private PrivilegeBag privileges;
++  private boolean revokeGrantOption;
++
++  public GrantRevokePrivilegeRequestBuilder() {
++    privileges = new PrivilegeBag();
++    revokeGrantOption = false;
++  }
++
++  public GrantRevokePrivilegeRequestBuilder setRequestType(GrantRevokeType requestType) {
++    this.requestType = requestType;
++    return this;
++  }
++
++  public GrantRevokePrivilegeRequestBuilder setRevokeGrantOption(boolean revokeGrantOption) {
++    this.revokeGrantOption = revokeGrantOption;
++    return this;
++  }
++
++  public GrantRevokePrivilegeRequestBuilder addPrivilege(HiveObjectPrivilege privilege) {
++    privileges.addToPrivileges(privilege);
++    return this;
++  }
++
++  public GrantRevokePrivilegeRequest build() throws MetaException {
++    if (requestType == null || privileges.getPrivilegesSize() == 0) {
++      throw new MetaException("The request type and at least one privilege must be provided.");
++    }
++    GrantRevokePrivilegeRequest rqst = new GrantRevokePrivilegeRequest(requestType, privileges);
++    if (revokeGrantOption) rqst.setRevokeGrantOption(revokeGrantOption);
++    return rqst;
++  }
++}
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/HiveObjectPrivilegeBuilder.java b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/HiveObjectPrivilegeBuilder.java
+new file mode 100644
+index 0000000..d802e1a
+--- /dev/null
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/HiveObjectPrivilegeBuilder.java
+@@ -0,0 +1,63 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ * <p>
++ * http://www.apache.org/licenses/LICENSE-2.0
++ * <p>
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.hadoop.hive.metastore.client.builder;
++
++import org.apache.hadoop.hive.metastore.api.HiveObjectPrivilege;
++import org.apache.hadoop.hive.metastore.api.HiveObjectRef;
++import org.apache.hadoop.hive.metastore.api.MetaException;
++import org.apache.hadoop.hive.metastore.api.PrincipalType;
++import org.apache.hadoop.hive.metastore.api.PrivilegeGrantInfo;
++
++/**
++ * Builder for {@link HiveObjectPrivilege}.  All values must be set.
++ */
++public class HiveObjectPrivilegeBuilder {
++  private HiveObjectRef hiveObjectRef;
++  private String principleName;
++  private PrincipalType principalType;
++  private PrivilegeGrantInfo grantInfo;
++
++  public HiveObjectPrivilegeBuilder setHiveObjectRef(HiveObjectRef hiveObjectRef) {
++    this.hiveObjectRef = hiveObjectRef;
++    return this;
++  }
++
++  public HiveObjectPrivilegeBuilder setPrincipleName(String principleName) {
++    this.principleName = principleName;
++    return this;
++  }
++
++  public HiveObjectPrivilegeBuilder setPrincipalType(PrincipalType principalType) {
++    this.principalType = principalType;
++    return this;
++  }
++
++  public HiveObjectPrivilegeBuilder setGrantInfo(PrivilegeGrantInfo grantInfo) {
++    this.grantInfo = grantInfo;
++    return this;
++  }
++
++  public HiveObjectPrivilege build() throws MetaException {
++    if (hiveObjectRef == null || principleName == null || principalType == null ||
++        grantInfo == null) {
++      throw new MetaException("hive object reference, principle name and type, and grant info " +
++          "must all be provided");
++    }
++    return new HiveObjectPrivilege(hiveObjectRef, principleName, principalType, grantInfo);
++  }
++}
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/IndexBuilder.java b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/IndexBuilder.java
+new file mode 100644
+index 0000000..6c8b1d8
+--- /dev/null
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/IndexBuilder.java
+@@ -0,0 +1,104 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ * <p>
++ * http://www.apache.org/licenses/LICENSE-2.0
++ * <p>
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.hadoop.hive.metastore.client.builder;
++
++import org.apache.hadoop.hive.metastore.api.Index;
++import org.apache.hadoop.hive.metastore.api.MetaException;
++import org.apache.hadoop.hive.metastore.api.Table;
++
++import java.util.HashMap;
++import java.util.Map;
++
++/**
++ * Builder for indices.  You must supply the database name and table name (or table reference), a
++ * name for the index, and whatever StorageDescriptorBuilder requires.  All other fields will be
++ * given reasonable defaults.
++ */
++public class IndexBuilder extends StorageDescriptorBuilder<IndexBuilder> {
++  private String dbName, tableName, indexName, indexTableName, handlerClass;
++  private int createTime, lastAccessTime;
++  private Map<String, String> indexParams;
++  private boolean deferredRebuild;
++
++  public IndexBuilder() {
++    // Set some reasonable defaults
++    indexParams = new HashMap<>();
++    createTime = lastAccessTime = (int)(System.currentTimeMillis() / 1000);
++    super.setChild(this);
++  }
++
++  public IndexBuilder setDbName(String dbName) {
++    this.dbName = dbName;
++    return this;
++  }
++
++  public IndexBuilder setTableName(String tableName) {
++    this.tableName = tableName;
++    return this;
++  }
++
++  public IndexBuilder setDbAndTableName(Table table) {
++    this.dbName = table.getDbName();
++    this.tableName = table.getTableName();
++    return this;
++  }
++
++  public IndexBuilder setCreateTime(int createTime) {
++    this.createTime = createTime;
++    return this;
++  }
++
++  public IndexBuilder setLastAccessTime(int lastAccessTime) {
++    this.lastAccessTime = lastAccessTime;
++    return this;
++  }
++
++  public IndexBuilder setIndexParams(Map<String, String> indexParams) {
++    this.indexParams = indexParams;
++    return this;
++  }
++
++  public IndexBuilder setIndexName(String indexName) {
++    this.indexName = indexName;
++    return this;
++  }
++
++  public IndexBuilder setIndexTableName(String indexTableName) {
++    this.indexTableName = indexTableName;
++    return this;
++  }
++
++  public IndexBuilder setHandlerClass(String handlerClass) {
++    this.handlerClass = handlerClass;
++    return this;
++  }
++
++  public IndexBuilder setDeferredRebuild(boolean deferredRebuild) {
++    this.deferredRebuild = deferredRebuild;
++    return this;
++  }
++
++  public Index build() throws MetaException {
++    if (dbName == null || tableName == null || indexName == null) {
++      throw new MetaException("You must provide database name, table name, and index name");
++    }
++    if (indexTableName == null) indexTableName = tableName + "_" + indexName + "_table";
++    return new Index(indexName, handlerClass, dbName, tableName, createTime, lastAccessTime,
++        indexTableName, buildSd(), indexParams, deferredRebuild);
++  }
++}
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/PartitionBuilder.java b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/PartitionBuilder.java
+new file mode 100644
+index 0000000..265625f
+--- /dev/null
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/PartitionBuilder.java
+@@ -0,0 +1,102 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ * <p>
++ * http://www.apache.org/licenses/LICENSE-2.0
++ * <p>
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.hadoop.hive.metastore.client.builder;
++
++import org.apache.hadoop.hive.metastore.api.MetaException;
++import org.apache.hadoop.hive.metastore.api.Partition;
++import org.apache.hadoop.hive.metastore.api.Table;
++
++import java.util.ArrayList;
++import java.util.HashMap;
++import java.util.List;
++import java.util.Map;
++
++/**
++ * Builder for {@link Partition}.  The only requirements are 1. (database name and table name) or table
++ * reference; 2. partition values; 3. whatever {@link StorageDescriptorBuilder} requires.
++ */
++public class PartitionBuilder extends StorageDescriptorBuilder<PartitionBuilder> {
++  private String dbName, tableName;
++  private int createTime, lastAccessTime;
++  private Map<String, String> partParams;
++  private List<String> values;
++
++  public PartitionBuilder() {
++    // Set some reasonable defaults
++    partParams = new HashMap<>();
++    createTime = lastAccessTime = (int)(System.currentTimeMillis() / 1000);
++    super.setChild(this);
++  }
++
++  public PartitionBuilder setDbName(String dbName) {
++    this.dbName = dbName;
++    return this;
++  }
++
++  public PartitionBuilder setTableName(String tableName) {
++    this.tableName = tableName;
++    return this;
++  }
++
++  public PartitionBuilder setDbAndTableName(Table table) {
++    this.dbName = table.getDbName();
++    this.tableName = table.getTableName();
++    return this;
++  }
++
++  public PartitionBuilder setValues(List<String> values) {
++    this.values = values;
++    return this;
++  }
++
++  public PartitionBuilder addValue(String value) {
++    if (values == null) values = new ArrayList<>();
++    values.add(value);
++    return this;
++  }
++
++  public PartitionBuilder setCreateTime(int createTime) {
++    this.createTime = createTime;
++    return this;
++  }
++
++  public PartitionBuilder setLastAccessTime(int lastAccessTime) {
++    this.lastAccessTime = lastAccessTime;
++    return this;
++  }
++
++  public PartitionBuilder setPartParams(Map<String, String> partParams) {
++    this.partParams = partParams;
++    return this;
++  }
++
++  public PartitionBuilder addPartParam(String key, String value) {
++    if (partParams == null) partParams = new HashMap<>();
++    partParams.put(key, value);
++    return this;
++  }
++
++  public Partition build() throws MetaException {
++    if (dbName == null || tableName == null) {
++      throw new MetaException("database name and table name must be provided");
++    }
++    if (values == null) throw new MetaException("You must provide partition values");
++    return new Partition(values, dbName, tableName, createTime, lastAccessTime, buildSd(),
++        partParams);
++  }
++}
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/PrivilegeGrantInfoBuilder.java b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/PrivilegeGrantInfoBuilder.java
+new file mode 100644
+index 0000000..b0ebf5d
+--- /dev/null
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/PrivilegeGrantInfoBuilder.java
+@@ -0,0 +1,84 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ * <p>
++ * http://www.apache.org/licenses/LICENSE-2.0
++ * <p>
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.hadoop.hive.metastore.client.builder;
++
++import org.apache.hadoop.hive.metastore.api.MetaException;
++import org.apache.hadoop.hive.metastore.api.PrincipalType;
++import org.apache.hadoop.hive.metastore.api.PrivilegeGrantInfo;
++import org.apache.hadoop.hive.metastore.MetaStoreUtils;
++import org.apache.hadoop.hive.metastore.utils.SecurityUtils;
++
++import java.io.IOException;
++
++/**
++ * Builder for {@link PrivilegeGrantInfo}.  The privilege is required.  If not provided the grantor
++ * is
++ * assumed to be the current user.  This is really intended for use by the
++ * {@link HiveObjectPrivilegeBuilder}.
++ */
++public class PrivilegeGrantInfoBuilder {
++  private String privilege, grantor;
++  private int createTime;
++  private PrincipalType grantorType;
++  private boolean grantOption;
++
++  public PrivilegeGrantInfoBuilder() {
++    createTime = (int)(System.currentTimeMillis() / 1000);
++    grantOption = false;
++  }
++
++  public PrivilegeGrantInfoBuilder setPrivilege(String privilege) {
++    this.privilege = privilege;
++    return this;
++  }
++
++  public PrivilegeGrantInfoBuilder setGrantor(String grantor) {
++    this.grantor = grantor;
++    return this;
++  }
++
++  public PrivilegeGrantInfoBuilder setCreateTime(int createTime) {
++    this.createTime = createTime;
++    return this;
++  }
++
++  public PrivilegeGrantInfoBuilder setGrantorType(PrincipalType grantorType) {
++    this.grantorType = grantorType;
++    return this;
++  }
++
++  public PrivilegeGrantInfoBuilder setGrantOption(boolean grantOption) {
++    this.grantOption = grantOption;
++    return this;
++  }
++
++  public PrivilegeGrantInfo build() throws MetaException {
++    if (privilege == null) {
++      throw new MetaException("Privilege must be provided.");
++    }
++    if (grantor == null) {
++      try {
++        grantor = SecurityUtils.getUser();
++        grantorType = PrincipalType.USER;
++      } catch (IOException e) {
++        throw MetaStoreUtils.newMetaException(e);
++      }
++    }
++    return new PrivilegeGrantInfo(privilege, createTime, grantor, grantorType, grantOption);
++  }
++}
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/RoleBuilder.java b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/RoleBuilder.java
+new file mode 100644
+index 0000000..0b8d189
+--- /dev/null
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/RoleBuilder.java
+@@ -0,0 +1,55 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ * <p>
++ * http://www.apache.org/licenses/LICENSE-2.0
++ * <p>
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.hadoop.hive.metastore.client.builder;
++
++import org.apache.hadoop.hive.metastore.api.MetaException;
++import org.apache.hadoop.hive.metastore.api.Role;
++
++/**
++ * A builder for {@link Role}.  The roleName and the ownerName must be provided.
++ */
++public class RoleBuilder {
++  private String roleName, ownerName;
++  private int createTime;
++
++  public RoleBuilder() {
++    createTime = (int)(System.currentTimeMillis() / 1000);
++  }
++
++  public RoleBuilder setRoleName(String roleName) {
++    this.roleName = roleName;
++    return this;
++  }
++
++  public RoleBuilder setOwnerName(String ownerName) {
++    this.ownerName = ownerName;
++    return this;
++  }
++
++  public RoleBuilder setCreateTime(int createTime) {
++    this.createTime = createTime;
++    return this;
++  }
++
++  public Role build() throws MetaException {
++    if (roleName == null || ownerName == null) {
++      throw new MetaException("role name and owner name must be provided.");
++    }
++    return new Role(roleName, createTime, ownerName);
++  }
++}
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/StorageDescriptorBuilder.java b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/StorageDescriptorBuilder.java
+new file mode 100644
+index 0000000..39d1fa2
+--- /dev/null
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/StorageDescriptorBuilder.java
+@@ -0,0 +1,210 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ * <p>
++ * http://www.apache.org/licenses/LICENSE-2.0
++ * <p>
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.hadoop.hive.metastore.client.builder;
++
++import org.apache.hadoop.hive.metastore.api.FieldSchema;
++import org.apache.hadoop.hive.metastore.api.MetaException;
++import org.apache.hadoop.hive.metastore.api.Order;
++import org.apache.hadoop.hive.metastore.api.SerDeInfo;
++import org.apache.hadoop.hive.metastore.api.SkewedInfo;
++import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
++
++import java.util.ArrayList;
++import java.util.HashMap;
++import java.util.List;
++import java.util.Map;
++
++/**
++ * Builds a {@link StorageDescriptor}.  Only requires that columns be set.  It picks reasonable
++ * defaults for everything else.  This is intended for use just by objects that have a StorageDescriptor,
++ * not direct use.
++ */
++abstract class StorageDescriptorBuilder<T> {
++  private static final String SERDE_LIB = "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe";
++  private static final String INPUT_FORMAT = "org.apache.hadoop.hive.ql.io.HiveInputFormat";
++  private static final String OUTPUT_FORMAT = "org.apache.hadoop.hive.ql.io.HiveOutputFormat";
++
++  private String location, inputFormat, outputFormat, serdeName, serdeLib;
++  private List<FieldSchema> cols;
++  private int numBuckets;
++  private Map<String, String> storageDescriptorParams, serdeParams;
++  private boolean compressed, storedAsSubDirectories;
++  private List<String> bucketCols, skewedColNames;
++  private List<Order> sortCols;
++  private List<List<String>> skewedColValues;
++  private Map<List<String>, String> skewedColValueLocationMaps;
++  // This enables us to return the correct type from the builder
++  private T child;
++
++  protected StorageDescriptorBuilder() {
++    // Set some reasonable defaults
++    storageDescriptorParams = new HashMap<>();
++    serdeParams = new HashMap<>();
++    bucketCols = new ArrayList<>();
++    sortCols = new ArrayList<>();
++    numBuckets = 0;
++    compressed = false;
++    inputFormat = INPUT_FORMAT;
++    outputFormat = OUTPUT_FORMAT;
++    serdeLib = SERDE_LIB;
++    skewedColNames = new ArrayList<>();
++    skewedColValues = new ArrayList<>();
++    skewedColValueLocationMaps = new HashMap<>();
++  }
++
++  protected StorageDescriptor buildSd() throws MetaException {
++    if (cols == null) throw new MetaException("You must provide the columns");
++    SerDeInfo serdeInfo = new SerDeInfo(serdeName, serdeLib, serdeParams);
++    StorageDescriptor sd = new StorageDescriptor(cols, location, inputFormat, outputFormat,
++        compressed, numBuckets, serdeInfo, bucketCols, sortCols, storageDescriptorParams);
++    sd.setStoredAsSubDirectories(storedAsSubDirectories);
++    if (skewedColNames != null) {
++      SkewedInfo skewed = new SkewedInfo(skewedColNames, skewedColValues,
++          skewedColValueLocationMaps);
++      sd.setSkewedInfo(skewed);
++    }
++    return sd;
++  }
++
++  protected void setChild(T child) {
++    this.child = child;
++  }
++
++  public T setLocation(String location) {
++    this.location = location;
++    return child;
++  }
++
++  public T setInputFormat(String inputFormat) {
++    this.inputFormat = inputFormat;
++    return child;
++  }
++
++  public T setOutputFormat(String outputFormat) {
++    this.outputFormat = outputFormat;
++    return child;
++  }
++
++  public T setSerdeName(String serdeName) {
++    this.serdeName = serdeName;
++    return child;
++  }
++
++  public T setSerdeLib(String serdeLib) {
++    this.serdeLib = serdeLib;
++    return child;
++  }
++  public T setCols(List<FieldSchema> cols) {
++    this.cols = cols;
++    return child;
++  }
++
++  public T addCol(String name, String type, String comment) {
++    if (cols == null) cols = new ArrayList<>();
++    cols.add(new FieldSchema(name, type, comment));
++    return child;
++  }
++
++  public T addCol(String name, String type) {
++    return addCol(name, type, "");
++  }
++
++  public T setNumBuckets(int numBuckets) {
++    this.numBuckets = numBuckets;
++    return child;
++  }
++
++  public T setStorageDescriptorParams(
++      Map<String, String> storageDescriptorParams) {
++    this.storageDescriptorParams = storageDescriptorParams;
++    return child;
++  }
++
++  public T addStorageDescriptorParam(String key, String value) {
++    if (storageDescriptorParams == null) storageDescriptorParams = new HashMap<>();
++    storageDescriptorParams.put(key, value);
++    return child;
++  }
++
++  public T setSerdeParams(Map<String, String> serdeParams) {
++    this.serdeParams = serdeParams;
++    return child;
++  }
++
++  public T addSerdeParam(String key, String value) {
++    if (serdeParams == null) serdeParams = new HashMap<>();
++    serdeParams.put(key, value);
++    return child;
++  }
++
++  public T setCompressed(boolean compressed) {
++    this.compressed = compressed;
++    return child;
++  }
++
++  public T setStoredAsSubDirectories(boolean storedAsSubDirectories) {
++    this.storedAsSubDirectories = storedAsSubDirectories;
++    return child;
++  }
++
++  public T setBucketCols(List<String> bucketCols) {
++    this.bucketCols = bucketCols;
++    return child;
++  }
++
++  public T addBucketCol(String bucketCol) {
++    if (bucketCols == null) bucketCols = new ArrayList<>();
++    bucketCols.add(bucketCol);
++    return child;
++  }
++
++  public T setSkewedColNames(List<String> skewedColNames) {
++    this.skewedColNames = skewedColNames;
++    return child;
++  }
++
++  public T addSkewedColName(String skewedColName) {
++    if (skewedColNames == null) skewedColNames = new ArrayList<>();
++    skewedColNames.add(skewedColName);
++    return child;
++  }
++
++  public T setSortCols(List<Order> sortCols) {
++    this.sortCols = sortCols;
++    return child;
++  }
++
++  public T addSortCol(String col, int order) {
++    if (sortCols == null) sortCols = new ArrayList<>();
++    sortCols.add(new Order(col, order));
++    return child;
++  }
++
++  // It is not at all clear how to flatten these last two out in a useful way, and no one uses
++  // these anyway.
++  public T setSkewedColValues(List<List<String>> skewedColValues) {
++    this.skewedColValues = skewedColValues;
++    return child;
++  }
++
++  public T setSkewedColValueLocationMaps(
++      Map<List<String>, String> skewedColValueLocationMaps) {
++    this.skewedColValueLocationMaps = skewedColValueLocationMaps;
++    return child;
++  }
++}
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/TableBuilder.java b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/TableBuilder.java
+new file mode 100644
+index 0000000..10c932c
+--- /dev/null
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/TableBuilder.java
+@@ -0,0 +1,156 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ * <p>
++ * http://www.apache.org/licenses/LICENSE-2.0
++ * <p>
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.hadoop.hive.metastore.client.builder;
++
++import org.apache.hadoop.hive.metastore.MetaStoreUtils;
++import org.apache.hadoop.hive.metastore.api.Database;
++import org.apache.hadoop.hive.metastore.api.FieldSchema;
++import org.apache.hadoop.hive.metastore.api.MetaException;
++import org.apache.hadoop.hive.metastore.api.Table;
++import org.apache.hadoop.hive.metastore.utils.SecurityUtils;
++
++import java.io.IOException;
++import java.util.ArrayList;
++import java.util.HashMap;
++import java.util.List;
++import java.util.Map;
++
++/**
++ * Build a {@link Table}.  The database name and table name must be provided, plus whatever is
++ * needed by the underlying {@link StorageDescriptorBuilder}.
++ */
++public class TableBuilder extends StorageDescriptorBuilder<TableBuilder> {
++  private String dbName, tableName, owner, viewOriginalText, viewExpandedText, type;
++  private List<FieldSchema> partCols;
++  private int createTime, lastAccessTime, retention;
++  private Map<String, String> tableParams;
++  private boolean rewriteEnabled, temporary;
++
++  public TableBuilder() {
++    // Set some reasonable defaults
++    tableParams = new HashMap<>();
++    createTime = lastAccessTime = (int)(System.currentTimeMillis() / 1000);
++    retention = 0;
++    super.setChild(this);
++  }
++
++  public TableBuilder setDbName(String dbName) {
++    this.dbName = dbName;
++    return this;
++  }
++
++  public TableBuilder setDbName(Database db) {
++    this.dbName = db.getName();
++    return this;
++  }
++
++  public TableBuilder setTableName(String tableName) {
++    this.tableName = tableName;
++    return this;
++  }
++
++  public TableBuilder setOwner(String owner) {
++    this.owner = owner;
++    return this;
++  }
++
++  public TableBuilder setViewOriginalText(String viewOriginalText) {
++    this.viewOriginalText = viewOriginalText;
++    return this;
++  }
++
++  public TableBuilder setViewExpandedText(String viewExpandedText) {
++    this.viewExpandedText = viewExpandedText;
++    return this;
++  }
++
++  public TableBuilder setType(String type) {
++    this.type = type;
++    return this;
++  }
++
++  public TableBuilder setPartCols(List<FieldSchema> partCols) {
++    this.partCols = partCols;
++    return this;
++  }
++
++  public TableBuilder addPartCol(String name, String type, String comment) {
++    if (partCols == null) partCols = new ArrayList<>();
++    partCols.add(new FieldSchema(name, type, comment));
++    return this;
++  }
++
++  public TableBuilder addPartCol(String name, String type) {
++    return addPartCol(name, type, "");
++  }
++
++  public TableBuilder setCreateTime(int createTime) {
++    this.createTime = createTime;
++    return this;
++  }
++
++  public TableBuilder setLastAccessTime(int lastAccessTime) {
++    this.lastAccessTime = lastAccessTime;
++    return this;
++  }
++
++  public TableBuilder setRetention(int retention) {
++    this.retention = retention;
++    return this;
++  }
++
++  public TableBuilder setTableParams(Map<String, String> tableParams) {
++    this.tableParams = tableParams;
++    return this;
++  }
++
++  public TableBuilder addTableParam(String key, String value) {
++    if (tableParams == null) tableParams = new HashMap<>();
++    tableParams.put(key, value);
++    return this;
++  }
++
++  public TableBuilder setRewriteEnabled(boolean rewriteEnabled) {
++    this.rewriteEnabled = rewriteEnabled;
++    return this;
++  }
++
++  public TableBuilder setTemporary(boolean temporary) {
++    this.temporary = temporary;
++    return this;
++  }
++
++  public Table build() throws MetaException {
++    if (dbName == null || tableName == null) {
++      throw new MetaException("You must set the database and table name");
++    }
++    if (owner == null) {
++      try {
++        owner = SecurityUtils.getUser();
++      } catch (IOException e) {
++        throw MetaStoreUtils.newMetaException(e);
++      }
++    }
++    Table t = new Table(tableName, dbName, owner, createTime, lastAccessTime, retention, buildSd(),
++        partCols, tableParams, viewOriginalText, viewExpandedText, type);
++    // if (rewriteEnabled) t.setRewriteEnabled(true);
++    if (temporary) t.setTemporary(temporary);
++    return t;
++  }
++
++}
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/utils/SecurityUtils.java b/metastore/src/java/org/apache/hadoop/hive/metastore/utils/SecurityUtils.java
+new file mode 100644
+index 0000000..00e51ef
+--- /dev/null
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/utils/SecurityUtils.java
+@@ -0,0 +1,84 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ * <p>
++ * http://www.apache.org/licenses/LICENSE-2.0
++ * <p>
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.hadoop.hive.metastore.utils;
++
++import org.apache.commons.lang.StringUtils;
++import org.apache.hadoop.conf.Configuration;
++import org.apache.hadoop.io.Text;
++import org.apache.hadoop.security.SecurityUtil;
++import org.apache.hadoop.security.UserGroupInformation;
++import org.apache.hadoop.security.authentication.util.KerberosUtil;
++import org.apache.hadoop.security.token.Token;
++import org.apache.hadoop.security.token.TokenIdentifier;
++import org.apache.hadoop.security.token.TokenSelector;
++import org.apache.zookeeper.client.ZooKeeperSaslClient;
++
++import javax.security.auth.login.AppConfigurationEntry;
++import org.apache.thrift.transport.TSSLTransportFactory;
++import org.apache.thrift.transport.TServerSocket;
++import org.apache.thrift.transport.TSocket;
++import org.apache.thrift.transport.TTransport;
++import org.apache.thrift.transport.TTransportException;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++import javax.net.ssl.SSLParameters;
++import javax.net.ssl.SSLServerSocket;
++import javax.net.ssl.SSLSocket;
++import javax.security.auth.login.LoginException;
++import javax.security.auth.login.AppConfigurationEntry.LoginModuleControlFlag;
++
++import java.io.IOException;
++import java.util.HashMap;
++import java.util.Map;
++import java.net.InetSocketAddress;
++import java.net.UnknownHostException;
++import java.util.ArrayList;
++import java.util.Arrays;
++import java.util.List;
++
++public class SecurityUtils {
++  private static final Logger LOG = LoggerFactory.getLogger(SecurityUtils.class);
++
++  public static UserGroupInformation getUGI() throws LoginException, IOException {
++    String doAs = System.getenv("HADOOP_USER_NAME");
++    if (doAs != null && doAs.length() > 0) {
++      /*
++       * this allows doAs (proxy user) to be passed along across process boundary where
++       * delegation tokens are not supported.  For example, a DDL stmt via WebHCat with
++       * a doAs parameter, forks to 'hcat' which needs to start a Session that
++       * proxies the end user
++       */
++      return UserGroupInformation.createProxyUser(doAs, UserGroupInformation.getLoginUser());
++    }
++    return UserGroupInformation.getCurrentUser();
++  }
++
++  /**
++   * @return the user name set in hadoop.job.ugi param or the current user from System
++   * @throws IOException if underlying Hadoop call throws LoginException
++   */
++  public static String getUser() throws IOException {
++    try {
++      UserGroupInformation ugi = getUGI();
++      return ugi.getUserName();
++    } catch (LoginException le) {
++      throw new IOException(le);
++    }
++  }
++}
+-- 
+1.7.9.5
+

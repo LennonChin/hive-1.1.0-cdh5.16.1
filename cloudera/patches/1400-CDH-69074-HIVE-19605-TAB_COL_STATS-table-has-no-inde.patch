@@ -1,0 +1,195 @@
+From 7a62634f2b8fbbd23010a122069f10a809fb516c Mon Sep 17 00:00:00 2001
+From: Vihang Karajgaonkar <vihang@cloudera.com>
+Date: Mon, 11 Jun 2018 16:26:55 -0700
+Subject: [PATCH 1400/1431] CDH-69074 : HIVE-19605 : TAB_COL_STATS table has
+ no index on db/table name (Vihang Karajgaonkar
+ reviewed by Yongzhi Chen)
+
+==C5_FEATURE_IMPALA_METADATA==
+
+Change-Id: I93804dd4161ae47aaa9dec2f5f39cd5dfe57f660
+---
+ .../scripts/upgrade/derby/042-HIVE-19605.derby.sql |    1 +
+ .../upgrade/derby/hive-schema-1.1.0.derby.sql      |    1 +
+ ...de-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.derby.sql |    1 +
+ .../scripts/upgrade/mssql/027-HIVE-19605.mssql.sql |    1 +
+ .../upgrade/mssql/hive-schema-1.1.0.mssql.sql      |    1 +
+ ...e-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.msssql.sql |    1 +
+ .../scripts/upgrade/mysql/042-HIVE-19605.mysql.sql |    1 +
+ .../upgrade/mysql/hive-schema-1.1.0.mysql.sql      |    1 +
+ ...de-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.mysql.sql |    3 ++-
+ .../upgrade/oracle/042-HIVE-19605.oracle.sql       |    1 +
+ .../upgrade/oracle/hive-schema-1.1.0.oracle.sql    |    1 +
+ ...e-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.oracle.sql |    3 ++-
+ .../upgrade/postgres/041-HIVE-19605.postgres.sql   |    1 +
+ .../postgres/hive-schema-1.1.0.postgres.sql        |    1 +
+ ...1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.postgres.sql |    3 ++-
+ 15 files changed, 18 insertions(+), 3 deletions(-)
+ create mode 100644 metastore/scripts/upgrade/derby/042-HIVE-19605.derby.sql
+ create mode 100644 metastore/scripts/upgrade/mssql/027-HIVE-19605.mssql.sql
+ create mode 100644 metastore/scripts/upgrade/mysql/042-HIVE-19605.mysql.sql
+ create mode 100644 metastore/scripts/upgrade/oracle/042-HIVE-19605.oracle.sql
+ create mode 100644 metastore/scripts/upgrade/postgres/041-HIVE-19605.postgres.sql
+
+diff --git a/metastore/scripts/upgrade/derby/042-HIVE-19605.derby.sql b/metastore/scripts/upgrade/derby/042-HIVE-19605.derby.sql
+new file mode 100644
+index 0000000..304cc09
+--- /dev/null
++++ b/metastore/scripts/upgrade/derby/042-HIVE-19605.derby.sql
+@@ -0,0 +1 @@
++CREATE INDEX "APP"."TAB_COL_STATS_IDX" ON "APP"."TAB_COL_STATS" ("DB_NAME", "TABLE_NAME", "COLUMN_NAME");
+diff --git a/metastore/scripts/upgrade/derby/hive-schema-1.1.0.derby.sql b/metastore/scripts/upgrade/derby/hive-schema-1.1.0.derby.sql
+index d349f46..43cec1a 100644
+--- a/metastore/scripts/upgrade/derby/hive-schema-1.1.0.derby.sql
++++ b/metastore/scripts/upgrade/derby/hive-schema-1.1.0.derby.sql
+@@ -333,6 +333,7 @@ RUN 'hive-txn-schema-0.13.0.derby.sql';
+ --- Cloudera specific metastore schema patches
+ --- ------------------------------------------
+ RUN '041-HIVE-16556.derby.sql';
++RUN '042-HIVE-19605.derby.sql';
+ 
+ ALTER TABLE "APP".VERSION ADD COLUMN SCHEMA_VERSION_V2 VARCHAR(255);
+ -- -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+diff --git a/metastore/scripts/upgrade/derby/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.derby.sql b/metastore/scripts/upgrade/derby/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.derby.sql
+index 52eac64..34dd69b 100644
+--- a/metastore/scripts/upgrade/derby/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.derby.sql
++++ b/metastore/scripts/upgrade/derby/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.derby.sql
+@@ -1,5 +1,6 @@
+ -- Upgrade MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0
+ 
+ RUN '041-HIVE-19372.derby.sql';
++RUN '042-HIVE-19605.derby.sql';
+ 
+ UPDATE "APP".VERSION SET SCHEMA_VERSION='1.1.0', VERSION_COMMENT='Hive release version 1.1.0', SCHEMA_VERSION_V2='1.1.0-cdh5.16.0' where VER_ID=1;
+diff --git a/metastore/scripts/upgrade/mssql/027-HIVE-19605.mssql.sql b/metastore/scripts/upgrade/mssql/027-HIVE-19605.mssql.sql
+new file mode 100644
+index 0000000..813f605
+--- /dev/null
++++ b/metastore/scripts/upgrade/mssql/027-HIVE-19605.mssql.sql
+@@ -0,0 +1 @@
++CREATE INDEX TAB_COL_STATS_IDX ON TAB_COL_STATS (DB_NAME, TABLE_NAME, COLUMN_NAME);
+diff --git a/metastore/scripts/upgrade/mssql/hive-schema-1.1.0.mssql.sql b/metastore/scripts/upgrade/mssql/hive-schema-1.1.0.mssql.sql
+index 0431d7c..890a78c 100644
+--- a/metastore/scripts/upgrade/mssql/hive-schema-1.1.0.mssql.sql
++++ b/metastore/scripts/upgrade/mssql/hive-schema-1.1.0.mssql.sql
+@@ -944,6 +944,7 @@ ALTER TABLE TXN_COMPONENTS  WITH CHECK ADD FOREIGN KEY(TC_TXNID) REFERENCES TXNS
+ -- Cloudera specific metastore schema patches
+ -- ------------------------------------------
+ :r 026-HIVE-16556.mssql.sql
++:r 027-HIVE-19605.mssql.sql
+ 
+ ALTER TABLE VERSION ADD SCHEMA_VERSION_V2 VARCHAR(255);
+ -- -----------------------------------------------------------------------------------------------------------------------------------------
+diff --git a/metastore/scripts/upgrade/mssql/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.msssql.sql b/metastore/scripts/upgrade/mssql/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.msssql.sql
+index 026437e..b7683bf 100644
+--- a/metastore/scripts/upgrade/mssql/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.msssql.sql
++++ b/metastore/scripts/upgrade/mssql/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.msssql.sql
+@@ -1,6 +1,7 @@
+ SELECT 'Upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0' AS MESSAGE;
+ 
+ :r 026-HIVE-19372.mssql.sql
++:r 027-HIVE-19605.mssql.sql
+ 
+ UPDATE VERSION SET SCHEMA_VERSION='1.1.0', VERSION_COMMENT='Hive release version 1.1.0', SCHEMA_VERSION_V2='1.1.0-cdh5.16.0' where VER_ID=1;
+ SELECT 'Finished upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0' AS MESSAGE;
+diff --git a/metastore/scripts/upgrade/mysql/042-HIVE-19605.mysql.sql b/metastore/scripts/upgrade/mysql/042-HIVE-19605.mysql.sql
+new file mode 100644
+index 0000000..8d5aa49
+--- /dev/null
++++ b/metastore/scripts/upgrade/mysql/042-HIVE-19605.mysql.sql
+@@ -0,0 +1 @@
++CREATE INDEX TAB_COL_STATS_IDX ON TAB_COL_STATS (DB_NAME, TABLE_NAME, COLUMN_NAME) USING BTREE;
+diff --git a/metastore/scripts/upgrade/mysql/hive-schema-1.1.0.mysql.sql b/metastore/scripts/upgrade/mysql/hive-schema-1.1.0.mysql.sql
+index dffecd7..f09bff0 100644
+--- a/metastore/scripts/upgrade/mysql/hive-schema-1.1.0.mysql.sql
++++ b/metastore/scripts/upgrade/mysql/hive-schema-1.1.0.mysql.sql
+@@ -826,6 +826,7 @@ SOURCE hive-txn-schema-0.13.0.mysql.sql;
+ --  Cloudera specific metastore schema patches
+ -- -------------------------------------------
+ SOURCE 041-HIVE-16556.mysql.sql;
++SOURCE 042-HIVE-19605.mysql.sql;
+ 
+ ALTER TABLE VERSION ADD COLUMN SCHEMA_VERSION_V2 VARCHAR(255);
+ -- ------------------------------------------------------------------------------------------------------------------------------------------------------------------
+diff --git a/metastore/scripts/upgrade/mysql/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.mysql.sql b/metastore/scripts/upgrade/mysql/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.mysql.sql
+index 47a0edf..62f9779 100644
+--- a/metastore/scripts/upgrade/mysql/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.mysql.sql
++++ b/metastore/scripts/upgrade/mysql/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.mysql.sql
+@@ -1,6 +1,7 @@
+ -- Upgrade MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0
+ 
+ SOURCE 041-HIVE-19372.mysql.sql;
++SOURCE 042-HIVE-19605.mysql.sql;
+ 
+ UPDATE VERSION SET SCHEMA_VERSION='1.1.0', VERSION_COMMENT='Hive release version 1.1.0', SCHEMA_VERSION_V2='1.1.0-cdh5.16.0' where VER_ID=1;
+-SELECT 'Finished upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0' AS ' ';
+\ No newline at end of file
++SELECT 'Finished upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0' AS ' ';
+diff --git a/metastore/scripts/upgrade/oracle/042-HIVE-19605.oracle.sql b/metastore/scripts/upgrade/oracle/042-HIVE-19605.oracle.sql
+new file mode 100644
+index 0000000..813f605
+--- /dev/null
++++ b/metastore/scripts/upgrade/oracle/042-HIVE-19605.oracle.sql
+@@ -0,0 +1 @@
++CREATE INDEX TAB_COL_STATS_IDX ON TAB_COL_STATS (DB_NAME, TABLE_NAME, COLUMN_NAME);
+diff --git a/metastore/scripts/upgrade/oracle/hive-schema-1.1.0.oracle.sql b/metastore/scripts/upgrade/oracle/hive-schema-1.1.0.oracle.sql
+index bf3b72e..8481a65 100644
+--- a/metastore/scripts/upgrade/oracle/hive-schema-1.1.0.oracle.sql
++++ b/metastore/scripts/upgrade/oracle/hive-schema-1.1.0.oracle.sql
+@@ -787,6 +787,7 @@ CREATE INDEX FUNC_RU_N49 ON FUNC_RU (FUNC_ID);
+ -- Cloudera specific metastore schema patches
+ -- ------------------------------------------
+ @041-HIVE-16556.oracle.sql;
++@042-HIVE-19605.oracle.sql;
+ 
+ ALTER TABLE VERSION ADD SCHEMA_VERSION_V2 VARCHAR2(255);
+ -- -----------------------------------------------------------------
+diff --git a/metastore/scripts/upgrade/oracle/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.oracle.sql b/metastore/scripts/upgrade/oracle/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.oracle.sql
+index 13249c3..e6f0d1e 100644
+--- a/metastore/scripts/upgrade/oracle/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.oracle.sql
++++ b/metastore/scripts/upgrade/oracle/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.oracle.sql
+@@ -1,6 +1,7 @@
+ -- Upgrade MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0
+ 
+ @041-HIVE-19372.oracle.sql;
++@042-HIVE-19605.oracle.sql;
+ 
+ UPDATE VERSION SET SCHEMA_VERSION='1.1.0', VERSION_COMMENT='Hive release version 1.1.0', SCHEMA_VERSION_V2='1.1.0-cdh5.16.0' where VER_ID=1;
+-SELECT 'Finished upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0' AS Status from dual;
+\ No newline at end of file
++SELECT 'Finished upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0' AS Status from dual;
+diff --git a/metastore/scripts/upgrade/postgres/041-HIVE-19605.postgres.sql b/metastore/scripts/upgrade/postgres/041-HIVE-19605.postgres.sql
+new file mode 100644
+index 0000000..a6ec045
+--- /dev/null
++++ b/metastore/scripts/upgrade/postgres/041-HIVE-19605.postgres.sql
+@@ -0,0 +1 @@
++CREATE INDEX "TAB_COL_STATS_IDX" ON "TAB_COL_STATS" USING btree ("DB_NAME","TABLE_NAME","COLUMN_NAME");
+diff --git a/metastore/scripts/upgrade/postgres/hive-schema-1.1.0.postgres.sql b/metastore/scripts/upgrade/postgres/hive-schema-1.1.0.postgres.sql
+index ae3c4bc..4fe21a6 100644
+--- a/metastore/scripts/upgrade/postgres/hive-schema-1.1.0.postgres.sql
++++ b/metastore/scripts/upgrade/postgres/hive-schema-1.1.0.postgres.sql
+@@ -1492,6 +1492,7 @@ GRANT ALL ON SCHEMA public TO PUBLIC;
+ -- Cloudera specific metastore schema patches
+ -- ------------------------------------------
+ \i 040-HIVE-16556.postgres.sql;
++\i 041-HIVE-19605.postgres.sql;
+ 
+ ALTER TABLE "VERSION" ADD COLUMN "SCHEMA_VERSION_V2" VARCHAR(255);
+ -- ------------------------------------------------------------------------------------------------------------------------------
+diff --git a/metastore/scripts/upgrade/postgres/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.postgres.sql b/metastore/scripts/upgrade/postgres/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.postgres.sql
+index cb28dea..3d9a8ee 100644
+--- a/metastore/scripts/upgrade/postgres/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.postgres.sql
++++ b/metastore/scripts/upgrade/postgres/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.postgres.sql
+@@ -1,6 +1,7 @@
+ SELECT 'Upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0';
+ 
+-\i 042-HIVE-19372.postgres.sql;
++\i 040-HIVE-19372.postgres.sql;
++\i 041-HIVE-19605.postgres.sql;
+ 
+ UPDATE "VERSION" SET "SCHEMA_VERSION"='1.1.0', "VERSION_COMMENT"='Hive release version 1.1.0', "SCHEMA_VERSION_V2"='1.1.0-cdh5.16.0' where "VER_ID"=1;
+ SELECT 'Finished upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0';
+-- 
+1.7.9.5
+

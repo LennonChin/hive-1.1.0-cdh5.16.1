@@ -1,0 +1,422 @@
+From 8c14b0f1d77a8caf6e0b5a0db8cdb425f3746a75 Mon Sep 17 00:00:00 2001
+From: Karthik Manamcheri <karthik@cloudera.com>
+Date: Fri, 13 Jul 2018 14:08:19 -0500
+Subject: [PATCH 1413/1431] CDH-70339: HIVE-19783: Retrieve only locations in
+ HiveMetaStore.dropPartitionsAndGetLocations
+ (Peter Vary, reviewed by Alexander Kolbasov,
+ Vihang Karajgaonkar)
+
+(cherry picked from commit e36f6e4fbda354f33ba9cef6cf25e5573c78d618)
+
+==C5_FEATURE_IMPALA_METADATA==
+
+Change-Id: Iaefce50d4bd632aa92b179956c2d9b54ea521164
+---
+ .../org/apache/hadoop/hive/common/FileUtils.java   |   12 +++
+ .../hcatalog/listener/DummyRawStoreFailEvent.java  |    5 ++
+ .../hadoop/hive/metastore/HiveMetaStore.java       |   86 ++++++++++----------
+ .../apache/hadoop/hive/metastore/ObjectStore.java  |   44 ++++++++++
+ .../org/apache/hadoop/hive/metastore/RawStore.java |   14 ++++
+ .../metastore/client/builder/PartitionBuilder.java |    8 ++
+ .../metastore/DummyRawStoreControlledCommit.java   |    6 ++
+ .../metastore/DummyRawStoreForJdoConnection.java   |    6 ++
+ .../metastore/client/MetaStoreFactoryForTests.java |    1 +
+ .../client/TestTablesCreateDropAlterTruncate.java  |   14 +++-
+ 10 files changed, 151 insertions(+), 45 deletions(-)
+
+diff --git a/common/src/java/org/apache/hadoop/hive/common/FileUtils.java b/common/src/java/org/apache/hadoop/hive/common/FileUtils.java
+index 3b80b21..39ba81d 100644
+--- a/common/src/java/org/apache/hadoop/hive/common/FileUtils.java
++++ b/common/src/java/org/apache/hadoop/hive/common/FileUtils.java
+@@ -855,4 +855,16 @@ public static URI getURI(String path) throws URISyntaxException {
+     return result;
+   }
+ 
++  /**
++   * Returns a BEST GUESS as to whether or not other is a subdirectory of parent. It does not
++   * take into account any intricacies of the underlying file system, which is assumed to be
++   * HDFS. This should not return any false positives, but may return false negatives.
++   *
++   * @param parent
++   * @param other Directory to check if it is a subdirectory of parent
++   * @return True, if other is subdirectory of parent
++   */
++  public static boolean isSubdirectory(String parent, String other) {
++    return other.startsWith(parent.endsWith(Path.SEPARATOR) ? parent : parent + Path.SEPARATOR);
++  }
+ }
+diff --git a/itests/hcatalog-unit/src/test/java/org/apache/hive/hcatalog/listener/DummyRawStoreFailEvent.java b/itests/hcatalog-unit/src/test/java/org/apache/hive/hcatalog/listener/DummyRawStoreFailEvent.java
+index 202bfaf..91e92b0 100644
+--- a/itests/hcatalog-unit/src/test/java/org/apache/hive/hcatalog/listener/DummyRawStoreFailEvent.java
++++ b/itests/hcatalog-unit/src/test/java/org/apache/hive/hcatalog/listener/DummyRawStoreFailEvent.java
+@@ -235,6 +235,11 @@ public boolean dropPartition(String dbName, String tableName, List<String> partV
+     return objectStore.getPartitions(dbName, tableName, max);
+   }
+ 
++  public Map<String, String> getPartitionLocations(String dbName, String tblName,
++                                                   String baseLocationToNotShow, int max) {
++    return objectStore.getPartitionLocations(dbName, tblName, baseLocationToNotShow, max);
++  }
++
+   @Override
+   public void alterTable(String dbName, String name, Table newTable)
+       throws InvalidObjectException, MetaException {
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java b/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java
+index 539514a..4fa8970 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java
+@@ -187,6 +187,7 @@
+ import org.apache.hadoop.hive.metastore.messaging.EventMessage.EventType;
+ import org.apache.hadoop.hive.metastore.partition.spec.PartitionSpecProxy;
+ import org.apache.hadoop.hive.metastore.txn.TxnHandler;
++import org.apache.hadoop.hive.metastore.utils.SecurityUtils;
+ import org.apache.hadoop.hive.serde2.Deserializer;
+ import org.apache.hadoop.hive.serde2.SerDeException;
+ import org.apache.hadoop.hive.shims.HadoopShims;
+@@ -1187,7 +1188,7 @@ private void drop_database_core(RawStore ms,
+               // For each partition in each table, drop the partitions and get a list of
+               // partitions' locations which might need to be deleted
+               partitionPaths = dropPartitionsAndGetLocations(ms, name, table.getTableName(),
+-                  tablePath, table.getPartitionKeys(), deleteData && !isExternal(table));
++                  tablePath, deleteData && !isExternal(table));
+ 
+               // Drop the table but not its data
+               drop_table(name, table.getTableName(), false);
+@@ -1675,7 +1676,7 @@ private boolean drop_table_core(final RawStore ms, final String dbname, final St
+ 
+         // Drop the partitions and get a list of locations which need to be deleted
+         partPaths = dropPartitionsAndGetLocations(ms, dbname, name, tblPath,
+-            tbl.getPartitionKeys(), deleteData && !isExternal);
++            deleteData && !isExternal);
+         if (!ms.dropTable(dbname, name)) {
+           String tableName = dbname + "." + name;
+           throw new MetaException(indexName == null ? "Unable to drop table " + tableName:
+@@ -1773,79 +1774,76 @@ private void deletePartitionData(List<Path> partPaths, boolean ifPurge) {
+     }
+ 
+     /**
+-     * Retrieves the partitions specified by partitionKeys. If checkLocation, for locations of
+-     * partitions which may not be subdirectories of tablePath checks to make the locations are
+-     * writable.
++     * Deletes the partitions specified by dbName, tableName. If checkLocation is true, for
++     * locations of partitions which may not be subdirectories of tablePath checks to make sure the
++     * locations are writable.
+      *
+      * Drops the metadata for each partition.
+      *
+      * Provides a list of locations of partitions which may not be subdirectories of tablePath.
+      *
+-     * @param ms
+-     * @param dbName
+-     * @param tableName
+-     * @param tablePath
+-     * @param partitionKeys
+-     * @param checkLocation
++     * @param ms RawStore to use for metadata retrieval and delete
++     * @param dbName The dbName
++     * @param tableName The tableName
++     * @param tablePath The tablePath of which subdirectories does not have to be checked
++     * @param checkLocation Should we check the locations at all
+      * @return
+      * @throws MetaException
+      * @throws IOException
+-     * @throws InvalidInputException
+-     * @throws InvalidObjectException
+      * @throws NoSuchObjectException
+      */
+     private List<Path> dropPartitionsAndGetLocations(RawStore ms, String dbName,
+-      String tableName, Path tablePath, List<FieldSchema> partitionKeys, boolean checkLocation)
+-      throws MetaException, IOException, NoSuchObjectException, InvalidObjectException,
+-      InvalidInputException {
++      String tableName, Path tablePath, boolean checkLocation)
++      throws MetaException, IOException, NoSuchObjectException {
+       int partitionBatchSize = HiveConf.getIntVar(hiveConf,
+-          ConfVars.METASTORE_BATCH_RETRIEVE_MAX);
+-      Path tableDnsPath = null;
++          ConfVars.METASTORE_BATCH_RETRIEVE_TABLE_PARTITION_MAX);
++      String tableDnsPath = null;
+       if (tablePath != null) {
+-        tableDnsPath = wh.getDnsPath(tablePath);
++        tableDnsPath = wh.getDnsPath(tablePath).toString();
+       }
+       List<Path> partPaths = new ArrayList<Path>();
+-      Table tbl = ms.getTable(dbName, tableName);
+ 
+       // call dropPartition on each of the table's partitions to follow the
+       // procedure for cleanly dropping partitions.
+       while (true) {
+-        List<Partition> partsToDelete = ms.getPartitions(dbName, tableName, partitionBatchSize);
+-        if (partsToDelete == null || partsToDelete.isEmpty()) {
+-          break;
+-        }
+-        List<String> partNames = new ArrayList<String>();
+-        for (Partition part : partsToDelete) {
+-          if (checkLocation && part.getSd() != null &&
+-              part.getSd().getLocation() != null) {
+-
+-            Path partPath = wh.getDnsPath(new Path(part.getSd().getLocation()));
+-            if (tableDnsPath == null ||
+-                (partPath != null && !isSubdirectory(tableDnsPath, partPath))) {
+-              if (!wh.isWritable(partPath.getParent())) {
+-                throw new MetaException("Table metadata not deleted since the partition " +
+-                    Warehouse.makePartName(partitionKeys, part.getValues()) +
+-                    " has parent location " + partPath.getParent() + " which is not writable " +
+-                    "by " + hiveConf.getUser());
++        Map<String, String> partitionLocations = ms.getPartitionLocations(dbName, tableName,
++            tableDnsPath, partitionBatchSize);
++        if (partitionLocations == null || partitionLocations.isEmpty()) {
++          // No more partitions left to drop. Return with the collected path list to delete.
++          return partPaths;
++        }
++
++        if (checkLocation) {
++          for (String partName : partitionLocations.keySet()) {
++            String pathString = partitionLocations.get(partName);
++            if (pathString != null) {
++              Path partPath = wh.getDnsPath(new Path(pathString));
++              // Double check here. Maybe Warehouse.getDnsPath revealed relationship between the
++              // path objects
++              if (tableDnsPath == null ||
++                  !FileUtils.isSubdirectory(tableDnsPath, partPath.toString())) {
++                if (!wh.isWritable(partPath.getParent())) {
++                  throw new MetaException("Table metadata not deleted since the partition "
++                      + partName + " has parent location " + partPath.getParent()
++                      + " which is not writable by " + SecurityUtils.getUser());
++                }
++                partPaths.add(partPath);
+               }
+-              partPaths.add(partPath);
+             }
+           }
+-          partNames.add(Warehouse.makePartName(tbl.getPartitionKeys(), part.getValues()));
+         }
++
+         for (MetaStoreEventListener listener : listeners) {
+           //No drop part listener events fired for public listeners historically, for drop table case.
+           //Limiting to internal listeners for now, to avoid unexpected calls for public listeners.
+           if (listener instanceof HMSMetricsListener) {
+-            for (Partition part : partsToDelete) {
++            for (@SuppressWarnings("unused") String part : partitionLocations.keySet()) {
+               listener.onDropPartition(null);
+             }
+           }
+         }
+-        ms.dropPartitions(dbName, tableName, partNames);
++        ms.dropPartitions(dbName, tableName, new ArrayList<>(partitionLocations.keySet()));
+       }
+-
+-      return partPaths;
+     }
+ 
+     @Override
+@@ -4536,7 +4534,7 @@ private boolean drop_index_by_name_core(final RawStore ms,
+ 
+           // Drop the partitions and get a list of partition locations which need to be deleted
+           partPaths = dropPartitionsAndGetLocations(ms, qualified[0], qualified[1], tblPath,
+-              tbl.getPartitionKeys(), deleteData);
++              deleteData);
+           if (!ms.dropTable(qualified[0], qualified[1])) {
+             throw new MetaException("Unable to drop underlying data table "
+                 + qualified[0] + "." + qualified[1] + " for index " + indexName);
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/ObjectStore.java b/metastore/src/java/org/apache/hadoop/hive/metastore/ObjectStore.java
+index 5fbeab8..64a9130 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/ObjectStore.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/ObjectStore.java
+@@ -1974,6 +1974,50 @@ private boolean dropPartitionCommon(MPartition part) throws NoSuchObjectExceptio
+     return getPartitionsInternal(dbName, tableName, maxParts, true, true);
+   }
+ 
++  @Override
++  public Map<String, String> getPartitionLocations(String dbName, String tblName,
++                                                   String baseLocationToNotShow, int max) {
++    dbName = HiveStringUtils.normalizeIdentifier(dbName);
++    tblName = HiveStringUtils.normalizeIdentifier(tblName);
++
++    boolean success = false;
++    Query query = null;
++    Map<String, String> partLocations = new HashMap<>();
++    try {
++      openTransaction();
++      LOG.debug("Executing getPartitionLocations");
++
++      query = pm.newQuery(MPartition.class);
++      query.setFilter("this.table.database.name == t1 && this.table.tableName == t2");
++      query.declareParameters("String t1, String t2");
++      query.setResult("this.partitionName, this.sd.location");
++      if (max >= 0) {
++        //Row limit specified, set it on the Query
++        query.setRange(0, max);
++      }
++
++      List<Object[]> result = (List<Object[]>)query.execute(dbName, tblName);
++      for(Object[] row:result) {
++        String location = (String)row[1];
++        if (baseLocationToNotShow != null && location != null
++                && FileUtils.isSubdirectory(baseLocationToNotShow, location)) {
++          location = null;
++        }
++        partLocations.put((String)row[0], location);
++      }
++      LOG.debug("Done executing query for getPartitionLocations");
++      success = commitTransaction();
++    } finally {
++      if (!success) {
++        rollbackTransaction();
++      }
++      if (query != null) {
++        query.closeAll();
++      }
++    }
++    return partLocations;
++  }
++
+   protected List<Partition> getPartitionsInternal(
+       String dbName, String tblName, final int maxParts, boolean allowSql, boolean allowJdo)
+           throws MetaException, NoSuchObjectException {
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/RawStore.java b/metastore/src/java/org/apache/hadoop/hive/metastore/RawStore.java
+index 8840f64..0c9315e 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/RawStore.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/RawStore.java
+@@ -156,6 +156,20 @@ public abstract boolean dropPartition(String dbName, String tableName,
+   public abstract List<Partition> getPartitions(String dbName,
+       String tableName, int max) throws MetaException, NoSuchObjectException;
+ 
++  /**
++   * Get the location for every partition of a given table. If a partition location is a child of
++   * baseLocationToNotShow then the partitionName is returned, but the only null location is
++   * returned.
++   * @param dbName database name.
++   * @param tblName table name.
++   * @param baseLocationToNotShow Partition locations which are child of this path are omitted, and
++   *     null value returned instead.
++   * @param max The maximum number of partition locations returned, or -1 for all
++   * @return The map of the partitionName, location pairs
++   */
++  Map<String, String> getPartitionLocations(String dbName, String tblName,
++                                            String baseLocationToNotShow, int max);
++
+   public abstract void alterTable(String dbname, String name, Table newTable)
+       throws InvalidObjectException, MetaException;
+ 
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/PartitionBuilder.java b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/PartitionBuilder.java
+index 38e5a8f..10ff69e 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/PartitionBuilder.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/PartitionBuilder.java
+@@ -17,9 +17,11 @@
+  */
+ package org.apache.hadoop.hive.metastore.client.builder;
+ 
++import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+ import org.apache.hadoop.hive.metastore.api.MetaException;
+ import org.apache.hadoop.hive.metastore.api.Partition;
+ import org.apache.hadoop.hive.metastore.api.Table;
++import org.apache.thrift.TException;
+ 
+ import java.util.ArrayList;
+ import java.util.HashMap;
+@@ -100,4 +102,10 @@ public Partition build() throws MetaException {
+     return new Partition(values, dbName, tableName, createTime, lastAccessTime, buildSd(),
+         partParams);
+   }
++
++  public Partition addToTable(IMetaStoreClient client) throws TException {
++    Partition p = build();
++    client.add_partition(p);
++    return p;
++  }
+ }
+diff --git a/metastore/src/test/org/apache/hadoop/hive/metastore/DummyRawStoreControlledCommit.java b/metastore/src/test/org/apache/hadoop/hive/metastore/DummyRawStoreControlledCommit.java
+index 1b1bf27..9e74f4a 100644
+--- a/metastore/src/test/org/apache/hadoop/hive/metastore/DummyRawStoreControlledCommit.java
++++ b/metastore/src/test/org/apache/hadoop/hive/metastore/DummyRawStoreControlledCommit.java
+@@ -223,6 +223,12 @@ public boolean dropPartition(String dbName, String tableName, List<String> partV
+   }
+ 
+   @Override
++  public Map<String, String> getPartitionLocations(String dbName, String tblName,
++      String baseLocationToNotShow, int max) {
++    return objectStore.getPartitionLocations(dbName, tblName, baseLocationToNotShow, max);
++  }
++
++  @Override
+   public void alterTable(String dbName, String name, Table newTable)
+       throws InvalidObjectException, MetaException {
+     objectStore.alterTable(dbName, name, newTable);
+diff --git a/metastore/src/test/org/apache/hadoop/hive/metastore/DummyRawStoreForJdoConnection.java b/metastore/src/test/org/apache/hadoop/hive/metastore/DummyRawStoreForJdoConnection.java
+index 9078cef..02f3c71 100644
+--- a/metastore/src/test/org/apache/hadoop/hive/metastore/DummyRawStoreForJdoConnection.java
++++ b/metastore/src/test/org/apache/hadoop/hive/metastore/DummyRawStoreForJdoConnection.java
+@@ -221,6 +221,12 @@ public boolean dropPartition(String dbName, String tableName, List<String> part_
+   }
+ 
+   @Override
++  public Map<String, String> getPartitionLocations(String dbName, String tblName,
++      String baseLocationToNotShow, int max) {
++    return Collections.emptyMap();
++  }
++
++  @Override
+   public void alterTable(String dbname, String name, Table newTable) throws InvalidObjectException,
+       MetaException {
+ 
+diff --git a/metastore/src/test/org/apache/hadoop/hive/metastore/client/MetaStoreFactoryForTests.java b/metastore/src/test/org/apache/hadoop/hive/metastore/client/MetaStoreFactoryForTests.java
+index f637683..9b72fba 100644
+--- a/metastore/src/test/org/apache/hadoop/hive/metastore/client/MetaStoreFactoryForTests.java
++++ b/metastore/src/test/org/apache/hadoop/hive/metastore/client/MetaStoreFactoryForTests.java
+@@ -54,6 +54,7 @@
+     // set some values to use for getting conf. vars
+     HiveConf.setBoolVar(conf, HiveConf.ConfVars.METASTORE_METRICS, true);
+     HiveConf.setIntVar(conf, HiveConf.ConfVars.METASTORE_BATCH_RETRIEVE_MAX, 2);
++    HiveConf.setIntVar(conf, HiveConf.ConfVars.METASTORE_BATCH_RETRIEVE_TABLE_PARTITION_MAX, 2);
+     HiveConf.setIntVar(conf, HiveConf.ConfVars.METASTORE_LIMIT_PARTITION_REQUEST,
+         DEFAULT_LIMIT_PARTITION_REQUEST);
+     HiveConf.setVar(conf, HiveConf.ConfVars.METASTORE_EXPRESSION_PROXY_CLASS,
+diff --git a/metastore/src/test/org/apache/hadoop/hive/metastore/client/TestTablesCreateDropAlterTruncate.java b/metastore/src/test/org/apache/hadoop/hive/metastore/client/TestTablesCreateDropAlterTruncate.java
+index bd00fbf..8737377 100644
+--- a/metastore/src/test/org/apache/hadoop/hive/metastore/client/TestTablesCreateDropAlterTruncate.java
++++ b/metastore/src/test/org/apache/hadoop/hive/metastore/client/TestTablesCreateDropAlterTruncate.java
+@@ -155,7 +155,7 @@ public void setUp() throws Exception {
+     }
+ 
+     // Create partitions for the partitioned table
+-    for(int i=0; i < 3; i++) {
++    for(int i=0; i < 2; i++) {
+       Partition partition =
+           new PartitionBuilder()
+               .fromTable(testTables[3])
+@@ -163,6 +163,13 @@ public void setUp() throws Exception {
+               .build();
+       client.add_partition(partition);
+     }
++    // Add an external partition too
++    new PartitionBuilder()
++        .fromTable(testTables[3])
++        .addValue("a2")
++        .setLocation(metaStore.getWarehouseRoot() + "/external/a2")
++        .addToTable(client);
++
+     // Add data files to the partitioned table
+     List<Partition> partitions =
+         client.listPartitions(testTables[3].getDbName(), testTables[3].getTableName(), (short)-1);
+@@ -520,6 +527,8 @@ public void testDropTableCaseInsensitive() throws Exception {
+   @Test
+   public void testDropTableDeleteDir() throws Exception {
+     Table table = testTables[0];
++    Partition externalPartition = client.getPartition(partitionedTable.getDbName(),
++        partitionedTable.getTableName(), "test_part_col=a2");
+ 
+     client.dropTable(table.getDbName(), table.getTableName(), true, false);
+ 
+@@ -537,6 +546,9 @@ public void testDropTableDeleteDir() throws Exception {
+ 
+     Assert.assertFalse("Table path should be removed",
+         metaStore.isPathExists(new Path(partitionedTable.getSd().getLocation())));
++
++    Assert.assertFalse("Extra partition path should be removed",
++        metaStore.isPathExists(new Path(externalPartition.getSd().getLocation())));
+   }
+ 
+   @Test
+-- 
+1.7.9.5
+

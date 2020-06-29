@@ -1,0 +1,302 @@
+From b621b9ef64106e1ede872c4a2a883487ac015e51 Mon Sep 17 00:00:00 2001
+From: Xuefu Zhang <xuefu@uber.com>
+Date: Wed, 8 Feb 2017 14:58:19 -0800
+Subject: [PATCH 1391/1431] CDH-58585: HIVE-15683: Make what's done in
+ HIVE-15580 for group by configurable (reviewed by
+ Chao)
+
+(cherry picked from commit 6c901fb3e681edb76e3251996b14dac4ae092ce5)
+(cherry picked from commit 1a895fa0adcc3265dcfbfea355bdb1006db5b3c4)
+(cherry picked from commit 0fd0a9f3c1c663db3d706ad1a80db5155bda8753)
+
+Conflicts:
+	common/src/java/org/apache/hadoop/hive/conf/HiveConf.java
+	ql/src/java/org/apache/hadoop/hive/ql/exec/spark/HiveReduceFunction.java
+	ql/src/java/org/apache/hadoop/hive/ql/exec/spark/ReduceTran.java
+	ql/src/test/results/clientpositive/spark/union_remove_25.q.out
+
+Change-Id: Id98bd5bbfeafc69b259d77e06b6c3c1d6997a9f6
+---
+ .../java/org/apache/hadoop/hive/conf/HiveConf.java |    4 ++
+ .../hadoop/hive/ql/exec/spark/GroupByShuffler.java |   11 +++--
+ .../hive/ql/exec/spark/HiveReduceFunction.java     |   10 ++---
+ .../exec/spark/HiveReduceFunctionResultList.java   |   18 ++++++---
+ .../hadoop/hive/ql/exec/spark/ReduceTran.java      |    6 +--
+ .../hive/ql/exec/spark/RepartitionShuffler.java    |   42 ++++++++++++++++++++
+ .../hadoop/hive/ql/exec/spark/SortByShuffler.java  |    2 +-
+ .../hive/ql/exec/spark/SparkPlanGenerator.java     |    6 ++-
+ .../hadoop/hive/ql/exec/spark/SparkShuffler.java   |    4 +-
+ .../queries/clientpositive/lateral_view_explode2.q |    4 +-
+ .../clientpositive/spark/union_remove_25.q.out     |    2 +-
+ 11 files changed, 84 insertions(+), 25 deletions(-)
+ create mode 100644 ql/src/java/org/apache/hadoop/hive/ql/exec/spark/RepartitionShuffler.java
+
+diff --git a/common/src/java/org/apache/hadoop/hive/conf/HiveConf.java b/common/src/java/org/apache/hadoop/hive/conf/HiveConf.java
+index 20e110f..4b4f927 100644
+--- a/common/src/java/org/apache/hadoop/hive/conf/HiveConf.java
++++ b/common/src/java/org/apache/hadoop/hive/conf/HiveConf.java
+@@ -2243,6 +2243,10 @@ public void setSparkConfigUpdated(boolean isSparkConfigUpdated) {
+         "hive.spark.dynamic.partition.pruning.map.join.only", false,
+         "Turn on dynamic partition pruning only for map joins.\n" +
+         "If hive.spark.dynamic.partition.pruning is set to true, this parameter value is ignored."),
++    SPARK_USE_GROUPBY_SHUFFLE(
++        "hive.spark.use.groupby.shuffle", true,
++        "Spark groupByKey transformation has better performance but uses unbounded memory." +
++            "Turn this off when there is a memory issue."),
+     NWAYJOINREORDER("hive.reorder.nway.joins", true,
+       "Runs reordering of tables within single n-way join (i.e.: picks streamtable)"),
+     HIVE_MSCK_PATH_VALIDATION("hive.msck.path.validation", "throw",
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/GroupByShuffler.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/GroupByShuffler.java
+index 8267515..9f9e3b2 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/GroupByShuffler.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/GroupByShuffler.java
+@@ -20,18 +20,17 @@
+ 
+ import org.apache.hadoop.hive.ql.io.HiveKey;
+ import org.apache.hadoop.io.BytesWritable;
+-import org.apache.spark.HashPartitioner;
+ import org.apache.spark.api.java.JavaPairRDD;
+ 
+-public class GroupByShuffler implements SparkShuffler {
++public class GroupByShuffler implements SparkShuffler<Iterable<BytesWritable>> {
+ 
+   @Override
+-  public JavaPairRDD<HiveKey, BytesWritable> shuffle(
++  public JavaPairRDD<HiveKey, Iterable<BytesWritable>> shuffle(
+       JavaPairRDD<HiveKey, BytesWritable> input, int numPartitions) {
+-    if (numPartitions < 0) {
+-      numPartitions = 1;
++    if (numPartitions > 0) {
++      return input.groupByKey(numPartitions);
+     }
+-    return input.repartitionAndSortWithinPartitions(new HashPartitioner(numPartitions));
++    return input.groupByKey();
+   }
+ 
+   @Override
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/HiveReduceFunction.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/HiveReduceFunction.java
+index 5348299..d2618bc 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/HiveReduceFunction.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/HiveReduceFunction.java
+@@ -25,8 +25,8 @@
+ 
+ import scala.Tuple2;
+ 
+-public class HiveReduceFunction extends HivePairFlatMapFunction<
+-  Iterator<Tuple2<HiveKey, BytesWritable>>, HiveKey, BytesWritable> {
++public class HiveReduceFunction<V> extends HivePairFlatMapFunction<
++  Iterator<Tuple2<HiveKey, V>>, HiveKey, BytesWritable> {
+ 
+   private static final long serialVersionUID = 1L;
+ 
+@@ -37,12 +37,12 @@ public HiveReduceFunction(byte[] buffer, SparkReporter sparkReporter) {
+   @SuppressWarnings("unchecked")
+   @Override
+   public Iterable<Tuple2<HiveKey, BytesWritable>>
+-  call(Iterator<Tuple2<HiveKey, BytesWritable>> it) throws Exception {
++  call(Iterator<Tuple2<HiveKey, V>> it) throws Exception {
+     initJobConf();
+ 
+     SparkReduceRecordHandler reducerRecordhandler = new SparkReduceRecordHandler();
+-    HiveReduceFunctionResultList result =
+-        new HiveReduceFunctionResultList(it, reducerRecordhandler);
++    HiveReduceFunctionResultList<V> result =
++        new HiveReduceFunctionResultList<V>(it, reducerRecordhandler);
+     reducerRecordhandler.init(jobConf, result, sparkReporter);
+ 
+     return result;
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/HiveReduceFunctionResultList.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/HiveReduceFunctionResultList.java
+index 8708819..1f1517d 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/HiveReduceFunctionResultList.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/HiveReduceFunctionResultList.java
+@@ -25,8 +25,8 @@
+ 
+ import scala.Tuple2;
+ 
+-public class HiveReduceFunctionResultList extends
+-    HiveBaseFunctionResultList<Tuple2<HiveKey, BytesWritable>> {
++public class HiveReduceFunctionResultList<V> extends
++    HiveBaseFunctionResultList<Tuple2<HiveKey, V>> {
+   private static final long serialVersionUID = 1L;
+   private final SparkReduceRecordHandler reduceRecordHandler;
+ 
+@@ -37,16 +37,24 @@
+    * @param reducer Initialized {@link org.apache.hadoop.hive.ql.exec.mr.ExecReducer} instance.
+    */
+   public HiveReduceFunctionResultList(
+-      Iterator<Tuple2<HiveKey, BytesWritable>> inputIterator,
++      Iterator<Tuple2<HiveKey, V>> inputIterator,
+       SparkReduceRecordHandler reducer) {
+     super(inputIterator);
+     this.reduceRecordHandler = reducer;
+   }
+ 
+   @Override
+-  protected void processNextRecord(Tuple2<HiveKey, BytesWritable> inputRecord)
++  protected void processNextRecord(Tuple2<HiveKey, V> inputRecord)
+       throws IOException {
+-    reduceRecordHandler.processRow(inputRecord._1(), inputRecord._2());
++    HiveKey key = inputRecord._1();
++    V value = inputRecord._2();
++    if (value instanceof Iterable) {
++      @SuppressWarnings("unchecked")
++      Iterable<BytesWritable> values = (Iterable<BytesWritable>)value;
++      reduceRecordHandler.<BytesWritable>processRow(key, values.iterator());
++    } else {
++      reduceRecordHandler.processRow(key, value);
++    }
+   }
+ 
+   @Override
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/ReduceTran.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/ReduceTran.java
+index ebd1a18..db17ae4 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/ReduceTran.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/ReduceTran.java
+@@ -22,17 +22,17 @@
+ import org.apache.hadoop.io.BytesWritable;
+ import org.apache.spark.api.java.JavaPairRDD;
+ 
+-public class ReduceTran implements SparkTran<HiveKey, BytesWritable, HiveKey, BytesWritable> {
++public class ReduceTran<V> implements SparkTran<HiveKey, V, HiveKey, BytesWritable> {
+   private HiveReduceFunction reduceFunc;
+   private String name = "Reduce";
+ 
+   @Override
+   public JavaPairRDD<HiveKey, BytesWritable> transform(
+-      JavaPairRDD<HiveKey, BytesWritable> input) {
++      JavaPairRDD<HiveKey, V> input) {
+     return input.mapPartitionsToPair(reduceFunc);
+   }
+ 
+-  public void setReduceFunction(HiveReduceFunction redFunc) {
++  public void setReduceFunction(HiveReduceFunction<V> redFunc) {
+     this.reduceFunc = redFunc;
+   }
+ 
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/RepartitionShuffler.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/RepartitionShuffler.java
+new file mode 100644
+index 0000000..d0c708c
+--- /dev/null
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/RepartitionShuffler.java
+@@ -0,0 +1,42 @@
++/**
++ *  Licensed to the Apache Software Foundation (ASF) under one
++ *  or more contributor license agreements.  See the NOTICE file
++ *  distributed with this work for additional information
++ *  regarding copyright ownership.  The ASF licenses this file
++ *  to you under the Apache License, Version 2.0 (the
++ *  "License"); you may not use this file except in compliance
++ *  with the License.  You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ */
++
++package org.apache.hadoop.hive.ql.exec.spark;
++
++import org.apache.hadoop.hive.ql.io.HiveKey;
++import org.apache.hadoop.io.BytesWritable;
++import org.apache.spark.HashPartitioner;
++import org.apache.spark.api.java.JavaPairRDD;
++
++public class RepartitionShuffler implements SparkShuffler<BytesWritable> {
++
++  @Override
++  public JavaPairRDD<HiveKey, BytesWritable> shuffle(
++      JavaPairRDD<HiveKey, BytesWritable> input, int numPartitions) {
++    if (numPartitions < 0) {
++      numPartitions = 1;
++    }
++    return input.repartitionAndSortWithinPartitions(new HashPartitioner(numPartitions));
++  }
++
++  @Override
++  public String getName() {
++    return "GroupBy_Repartition";
++  }
++
++}
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SortByShuffler.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SortByShuffler.java
+index 9ce187d..3160d76 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SortByShuffler.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SortByShuffler.java
+@@ -24,7 +24,7 @@
+ import org.apache.spark.Partitioner;
+ import org.apache.spark.api.java.JavaPairRDD;
+ 
+-public class SortByShuffler implements SparkShuffler {
++public class SortByShuffler implements SparkShuffler<BytesWritable> {
+ 
+   private final boolean totalOrder;
+ 
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkPlanGenerator.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkPlanGenerator.java
+index 8219fb2..a9bbef7 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkPlanGenerator.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkPlanGenerator.java
+@@ -204,7 +204,11 @@ private ShuffleTran generate(SparkPlan sparkPlan, SparkEdgeProperty edge, boolea
+     } else if (edge.isShuffleSort()) {
+       shuffler = new SortByShuffler(true);
+     } else {
+-      shuffler = new GroupByShuffler();
++      boolean useSparkGroupBy = jobConf.getBoolean("hive.spark.use.groupby.shuffle", true);
++      if (!useSparkGroupBy) {
++        LOG.info("hive.spark.use.groupby.shuffle is off. Use repartitin shuffle instead.");
++      }
++      shuffler = useSparkGroupBy ? new GroupByShuffler() : new RepartitionShuffler();
+     }
+     return new ShuffleTran(sparkPlan, shuffler, edge.getNumPartitions(), toCache);
+   }
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkShuffler.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkShuffler.java
+index d71d940..e4913b5 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkShuffler.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkShuffler.java
+@@ -22,9 +22,9 @@
+ import org.apache.hadoop.io.BytesWritable;
+ import org.apache.spark.api.java.JavaPairRDD;
+ 
+-public interface SparkShuffler {
++public interface SparkShuffler<V> {
+ 
+-  JavaPairRDD<HiveKey, BytesWritable> shuffle(
++  JavaPairRDD<HiveKey, V> shuffle(
+       JavaPairRDD<HiveKey, BytesWritable> input, int numPartitions);
+ 
+   public String getName();
+diff --git a/ql/src/test/queries/clientpositive/lateral_view_explode2.q b/ql/src/test/queries/clientpositive/lateral_view_explode2.q
+index 3c48027..1b5479a 100644
+--- a/ql/src/test/queries/clientpositive/lateral_view_explode2.q
++++ b/ql/src/test/queries/clientpositive/lateral_view_explode2.q
+@@ -2,8 +2,10 @@ add jar ${system:maven.local.repository}/org/apache/hive/hive-contrib/${system:h
+ 
+ CREATE TEMPORARY FUNCTION explode2 AS 'org.apache.hadoop.hive.contrib.udtf.example.GenericUDTFExplode2';
+ 
++-- SORT_QUERY_RESULTS
++
+ EXPLAIN SELECT col1, col2 FROM src LATERAL VIEW explode2(array(1,2,3)) myTable AS col1, col2 group by col1, col2 LIMIT 3;
+ 
+ SELECT col1, col2 FROM src LATERAL VIEW explode2(array(1,2,3)) myTable AS col1, col2 group by col1, col2 LIMIT 3;
+ 
+-DROP TEMPORARY FUNCTION explode2;
+\ No newline at end of file
++DROP TEMPORARY FUNCTION explode2;
+diff --git a/ql/src/test/results/clientpositive/spark/union_remove_25.q.out b/ql/src/test/results/clientpositive/spark/union_remove_25.q.out
+index 3d136c2..79af958 100644
+--- a/ql/src/test/results/clientpositive/spark/union_remove_25.q.out
++++ b/ql/src/test/results/clientpositive/spark/union_remove_25.q.out
+@@ -416,7 +416,7 @@ Partition Parameters:
+ 	numFiles            	2                   
+ 	numRows             	-1                  
+ 	rawDataSize         	-1                  
+-	totalSize           	6812                
++	totalSize           	6826                
+ #### A masked pattern was here ####
+ 	 	 
+ # Storage Information	 	 
+-- 
+1.7.9.5
+

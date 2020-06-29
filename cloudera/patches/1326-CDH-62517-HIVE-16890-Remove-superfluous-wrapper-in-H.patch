@@ -1,0 +1,33 @@
+From 037c70249824767333a7d8c064a7cc7da5a615ef Mon Sep 17 00:00:00 2001
+From: Naveen Gangam <ngangam@apache.org>
+Date: Fri, 1 Dec 2017 16:08:41 -0500
+Subject: [PATCH 1326/1431] CDH-62517 HIVE-16890: Remove superfluous wrapper
+ in HiveVarcharWritable (Beluga Behr, reviewed by
+ Naveen Gangam)
+
+Conflicts:
+	serde/src/java/org/apache/hadoop/hive/serde2/io/HiveVarcharWritable.java
+
+Change-Id: I98eb5c9e5bd1cbee02676eb884989dc5242f715c
+---
+ .../hadoop/hive/serde2/io/HiveVarcharWritable.java |    4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/serde/src/java/org/apache/hadoop/hive/serde2/io/HiveVarcharWritable.java b/serde/src/java/org/apache/hadoop/hive/serde2/io/HiveVarcharWritable.java
+index 2e24730..edf8c1f 100644
+--- a/serde/src/java/org/apache/hadoop/hive/serde2/io/HiveVarcharWritable.java
++++ b/serde/src/java/org/apache/hadoop/hive/serde2/io/HiveVarcharWritable.java
+@@ -65,7 +65,9 @@ public HiveVarchar getHiveVarchar() {
+ 
+   public void enforceMaxLength(int maxLength) {
+     // Might be possible to truncate the existing Text value, for now just do something simple.
+-    set(getHiveVarchar(), maxLength);
++    if (getCharacterLength() > maxLength) {
++      set(value.toString(), maxLength);
++    }
+   }
+ 
+   @Override
+-- 
+1.7.9.5
+

@@ -1,0 +1,39 @@
+From 372c6d8a5c196daa9d568707c6a460683e1d5793 Mon Sep 17 00:00:00 2001
+From: stakiar <stakiar@cloudera.com>
+Date: Mon, 17 Sep 2018 10:17:50 -0700
+Subject: [PATCH 1424/1431] CLOUDERA-BUILD: CDH-67053: Revert jackson version
+ upgrade for testutils/ptest2/pom.xml
+
+==C5_APPROVED_BUGFIX==
+
+CDH-67053 upgraded the jackson version for ptest, which
+caused our test infra to break. The reason is that the
+ptest2 codebase is not connected to the root pom.xml
+so jackson-mapper-asl.1.9.version is not defined for
+ptest2.
+
+Ptest2 is not product code nor is it usuable by
+customers. It tests Hive tests in parallel across a cluster
+of nodes.
+
+Change-Id: I13ac2c9c477af50299d90f1560577ff478a6f8a9
+---
+ testutils/ptest2/pom.xml |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/testutils/ptest2/pom.xml b/testutils/ptest2/pom.xml
+index 1b24e9f..95267f9 100644
+--- a/testutils/ptest2/pom.xml
++++ b/testutils/ptest2/pom.xml
+@@ -134,7 +134,7 @@ limitations under the License.
+     <dependency>
+       <groupId>org.codehaus.jackson</groupId>
+       <artifactId>jackson-mapper-asl</artifactId>
+-      <version>${jackson-mapper-asl.1.9.version}</version>
++      <version>1.9.12</version>
+     </dependency>
+     <dependency>
+       <groupId>org.slf4j</groupId>
+-- 
+1.7.9.5
+

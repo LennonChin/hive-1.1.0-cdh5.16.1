@@ -1,0 +1,76 @@
+From 96a54886c8f59b5dc54eb29811d53ac4597665f5 Mon Sep 17 00:00:00 2001
+From: Rui Li <lirui@apache.org>
+Date: Mon, 13 Feb 2017 13:32:28 +0800
+Subject: [PATCH 1407/1431] CDH-59800: HIVE-15860: RemoteSparkJobMonitor may
+ hang when RemoteDriver exits abnormally (Rui
+ reviewed by Xuefu)
+
+==C5_APPROVED_BUGFIX==
+
+(cherry picked from commit eac8bc26f278665cbae95a5f8d319c994146dbed)
+(cherry picked from commit 7910661781393e8cc0992ab6c135a18fa1a68912)
+(cherry picked from commit db39f4d8c587903089414febd46304092a2203c7)
+
+Conflicts:
+	ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/RemoteSparkJobStatus.java
+
+Change-Id: I44520ea0f9d7f1c676977c08241f2dbbce846691
+---
+ .../exec/spark/status/RemoteSparkJobMonitor.java   |    7 ++++++-
+ .../spark/status/impl/RemoteSparkJobStatus.java    |    8 ++++++++
+ 2 files changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java
+index 5d00454..88216c7 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java
+@@ -20,6 +20,7 @@
+ 
+ import java.util.Map;
+ 
++import com.google.common.base.Preconditions;
+ import org.apache.hadoop.hive.conf.HiveConf;
+ import org.apache.hadoop.hive.ql.exec.Utilities;
+ import org.apache.hadoop.hive.ql.exec.spark.status.impl.RemoteSparkJobStatus;
+@@ -100,6 +101,10 @@ public int startMonitor() {
+ 
+             printStatus(progressMap, lastProgressMap);
+             lastProgressMap = progressMap;
++          } else if (sparkJobState == null) {
++            // in case the remote context crashes between JobStarted and JobSubmitted
++            Preconditions.checkState(sparkJobStatus.isRemoteActive(),
++                "Remote context becomes inactive.");
+           }
+           break;
+         case SUCCEEDED:
+@@ -153,7 +158,7 @@ public int startMonitor() {
+         }
+       } catch (Exception e) {
+         String msg = " with exception '" + Utilities.getNameMessage(e) + "'";
+-        msg = "Failed to monitor Job[ " + sparkJobStatus.getJobId() + "]" + msg;
++        msg = "Failed to monitor Job[" + sparkJobStatus.getJobId() + "]" + msg;
+ 
+         // Has to use full name to make sure it does not conflict with
+         // org.apache.commons.lang.StringUtils
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/RemoteSparkJobStatus.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/RemoteSparkJobStatus.java
+index fa7b222..defec94 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/RemoteSparkJobStatus.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/RemoteSparkJobStatus.java
+@@ -143,6 +143,14 @@ public Throwable getError() {
+     return jobHandle.getError();
+   }
+ 
++  /**
++   * Indicates whether the remote context is active. SparkJobMonitor can use this to decide whether
++   * to stop monitoring.
++   */
++  public boolean isRemoteActive() {
++    return sparkClient.isActive();
++  }
++
+   private SparkJobInfo getSparkJobInfo() throws HiveException {
+     Integer sparkJobId = jobHandle.getSparkJobIds().size() == 1
+       ? jobHandle.getSparkJobIds().get(0) : null;
+-- 
+1.7.9.5
+

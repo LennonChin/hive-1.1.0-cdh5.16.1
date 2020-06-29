@@ -1,0 +1,33 @@
+From 18f284df6f2befae4f5e16144ef0d95ad7cc4714 Mon Sep 17 00:00:00 2001
+From: Sahil Takiar <takiar.sahil@gmail.com>
+Date: Fri, 23 Feb 2018 09:59:31 -0800
+Subject: [PATCH 1409/1431] CDH-65353: HIVE-18765: SparkClientImpl swallows
+ exception messages from the RemoteDriver (Sahil
+ Takiar, reviewed by Xuefu Zhang)
+
+==C5_APPROVED_BUGFIX==
+
+(cherry picked from commit bcfc8f7104a0a678d6fd5cb4285368b901aeee26)
+(cherry picked from commit e3c4d51a1d49b3398f8c82237c93f8107d71ad2e)
+
+Change-Id: Ie228241fdfd4b657d9159a2350764d1f50965bd4
+---
+ .../apache/hive/spark/client/SparkClientImpl.java  |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/spark-client/src/main/java/org/apache/hive/spark/client/SparkClientImpl.java b/spark-client/src/main/java/org/apache/hive/spark/client/SparkClientImpl.java
+index f002bfe..1e92fae 100644
+--- a/spark-client/src/main/java/org/apache/hive/spark/client/SparkClientImpl.java
++++ b/spark-client/src/main/java/org/apache/hive/spark/client/SparkClientImpl.java
+@@ -595,7 +595,7 @@ void cancel(String jobId) {
+     }
+ 
+     private void handle(ChannelHandlerContext ctx, Error msg) {
+-      LOG.warn("Error reported from remote driver.", msg.cause);
++      LOG.warn("Error reported from remote driver: {}", msg.cause);
+     }
+ 
+     private void handle(ChannelHandlerContext ctx, JobMetrics msg) {
+-- 
+1.7.9.5
+

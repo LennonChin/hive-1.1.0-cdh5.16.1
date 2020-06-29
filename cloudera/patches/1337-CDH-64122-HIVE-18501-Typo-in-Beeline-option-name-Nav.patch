@@ -1,0 +1,32 @@
+From 5d3419763ada4f145584484dd1e72e96684da751 Mon Sep 17 00:00:00 2001
+From: Naveen Gangam <ngangam@apache.org>
+Date: Fri, 19 Jan 2018 17:04:02 -0500
+Subject: [PATCH 1337/1431] CDH-64122: HIVE-18501: Typo in Beeline option name
+ (Naveen Gangam, reviewed by Yongzhi Chen)
+
+Conflicts:
+	beeline/src/java/org/apache/hive/beeline/BeeLine.java
+
+Change-Id: I15666d34297d7959d74e860d422de6ac82fdf6b5
+---
+ .../src/java/org/apache/hive/beeline/BeeLine.java  |    4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/beeline/src/java/org/apache/hive/beeline/BeeLine.java b/beeline/src/java/org/apache/hive/beeline/BeeLine.java
+index 77def55..618f7eb 100644
+--- a/beeline/src/java/org/apache/hive/beeline/BeeLine.java
++++ b/beeline/src/java/org/apache/hive/beeline/BeeLine.java
+@@ -704,8 +704,8 @@ int initArgsFromCliVars(String[] args) {
+     }
+ 
+     dbName = commandLine.getOptionValue("database");
+-    getOpts().setVerbose(Boolean.valueOf(commandLine.getOptionValue("verbose")));
+-    getOpts().setSilent(Boolean.valueOf(commandLine.getOptionValue("slient")));
++    getOpts().setVerbose(Boolean.parseBoolean(commandLine.getOptionValue("verbose")));
++    getOpts().setSilent(Boolean.parseBoolean(commandLine.getOptionValue("silent")));
+ 
+     int code = 0;
+     if (commandLine.getOptionValues("e") != null) {
+-- 
+1.7.9.5
+

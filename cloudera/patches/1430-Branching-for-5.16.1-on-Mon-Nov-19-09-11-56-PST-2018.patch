@@ -1,0 +1,898 @@
+From 33d81bf506aa3bc5f60130789c812f5ee5d1e7fc Mon Sep 17 00:00:00 2001
+From: Jenkins <dev-kitchen@cloudera.com>
+Date: Mon, 19 Nov 2018 09:13:31 -0800
+Subject: [PATCH 1430/1431] Branching for 5.16.1 on Mon Nov 19 09:11:56 PST
+ 2018
+
+JOB_NAME : 'Cut-Release-Branches'
+BUILD_NUMBER : '552'
+CODE_BRANCH : ''
+OLD_CDH_BRANCH : 'cdh5_5.16.0'
+
+Pushed to remote apache	git@github.sf.cloudera.com:Mirrors/apache-hive.git (push)
+origin	git@github.sf.cloudera.com:CDH/hive.git (push)
+---
+ accumulo-handler/pom.xml                           |    2 +-
+ ant/pom.xml                                        |    2 +-
+ beeline/pom.xml                                    |    2 +-
+ classification/pom.xml                             |    2 +-
+ cli/pom.xml                                        |    2 +-
+ common/pom.xml                                     |    2 +-
+ contrib/pom.xml                                    |    2 +-
+ hbase-handler/pom.xml                              |    2 +-
+ hcatalog/core/pom.xml                              |    2 +-
+ hcatalog/hcatalog-pig-adapter/pom.xml              |    2 +-
+ hcatalog/pom.xml                                   |    2 +-
+ hcatalog/server-extensions/pom.xml                 |    2 +-
+ hcatalog/streaming/pom.xml                         |    2 +-
+ hcatalog/webhcat/java-client/pom.xml               |    2 +-
+ hcatalog/webhcat/svr/pom.xml                       |    2 +-
+ hwi/pom.xml                                        |    2 +-
+ itests/custom-serde/pom.xml                        |    2 +-
+ itests/custom-udfs/pom.xml                         |    2 +-
+ itests/custom-udfs/udf-classloader-udf1/pom.xml    |    2 +-
+ itests/custom-udfs/udf-classloader-udf2/pom.xml    |    2 +-
+ itests/custom-udfs/udf-classloader-util/pom.xml    |    2 +-
+ itests/hcatalog-unit/pom.xml                       |    2 +-
+ itests/hive-blobstore/pom.xml                      |    2 +-
+ itests/hive-jmh/pom.xml                            |    2 +-
+ itests/hive-minikdc/pom.xml                        |    2 +-
+ itests/hive-unit-hadoop2/pom.xml                   |    2 +-
+ itests/hive-unit/pom.xml                           |    2 +-
+ itests/pom.xml                                     |    2 +-
+ itests/qtest-spark/pom.xml                         |    2 +-
+ itests/qtest/pom.xml                               |    2 +-
+ itests/test-serde/pom.xml                          |    2 +-
+ itests/util/pom.xml                                |    2 +-
+ jdbc/pom.xml                                       |    2 +-
+ metastore/pom.xml                                  |    2 +-
+ .../scripts/upgrade/derby/cdh.upgrade.order.derby  |    2 +-
+ .../upgrade/derby/hive-schema-1.1.0.derby.sql      |    2 +-
+ ...de-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.derby.sql |    4 ++--
+ .../scripts/upgrade/mssql/cdh.upgrade.order.mssql  |    2 +-
+ .../upgrade/mssql/hive-schema-1.1.0.mssql.sql      |    2 +-
+ ...e-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.msssql.sql |    6 +++---
+ .../scripts/upgrade/mysql/cdh.upgrade.order.mysql  |    2 +-
+ .../upgrade/mysql/hive-schema-1.1.0.mysql.sql      |    2 +-
+ ...de-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.mysql.sql |    6 +++---
+ .../upgrade/oracle/cdh.upgrade.order.oracle        |    2 +-
+ .../upgrade/oracle/hive-schema-1.1.0.oracle.sql    |    2 +-
+ ...e-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.oracle.sql |    6 +++---
+ .../upgrade/postgres/cdh.upgrade.order.postgres    |    2 +-
+ .../postgres/hive-schema-1.1.0.postgres.sql        |    2 +-
+ ...1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.postgres.sql |    6 +++---
+ odbc/pom.xml                                       |    2 +-
+ packaging/pom.xml                                  |    2 +-
+ pom.xml                                            |    6 +++---
+ ql/pom.xml                                         |    2 +-
+ serde/pom.xml                                      |    2 +-
+ service/pom.xml                                    |    2 +-
+ shims/0.20S/pom.xml                                |    2 +-
+ shims/0.23/pom.xml                                 |    2 +-
+ shims/aggregator/pom.xml                           |    2 +-
+ shims/common/pom.xml                               |    2 +-
+ shims/pom.xml                                      |    2 +-
+ shims/scheduler/pom.xml                            |    2 +-
+ spark-client/pom.xml                               |    2 +-
+ testutils/pom.xml                                  |    2 +-
+ 63 files changed, 74 insertions(+), 74 deletions(-)
+
+diff --git a/accumulo-handler/pom.xml b/accumulo-handler/pom.xml
+index 4665bdf..74d2538 100644
+--- a/accumulo-handler/pom.xml
++++ b/accumulo-handler/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/ant/pom.xml b/ant/pom.xml
+index 666ed95..35fbe11 100644
+--- a/ant/pom.xml
++++ b/ant/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/beeline/pom.xml b/beeline/pom.xml
+index 444678c..03a2c4d 100644
+--- a/beeline/pom.xml
++++ b/beeline/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/classification/pom.xml b/classification/pom.xml
+index 59f7bf7..a0ce4e0 100644
+--- a/classification/pom.xml
++++ b/classification/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/cli/pom.xml b/cli/pom.xml
+index f36dfd8..c788eff 100644
+--- a/cli/pom.xml
++++ b/cli/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/common/pom.xml b/common/pom.xml
+index cc58ce7..87572ec 100644
+--- a/common/pom.xml
++++ b/common/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/contrib/pom.xml b/contrib/pom.xml
+index 3ff3731..f65e176 100644
+--- a/contrib/pom.xml
++++ b/contrib/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/hbase-handler/pom.xml b/hbase-handler/pom.xml
+index 41e3fc6..a8a683e 100644
+--- a/hbase-handler/pom.xml
++++ b/hbase-handler/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/hcatalog/core/pom.xml b/hcatalog/core/pom.xml
+index 55842ed..bcb61e2 100644
+--- a/hcatalog/core/pom.xml
++++ b/hcatalog/core/pom.xml
+@@ -26,7 +26,7 @@
+   <parent>
+     <groupId>org.apache.hive.hcatalog</groupId>
+     <artifactId>hive-hcatalog</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/hcatalog/hcatalog-pig-adapter/pom.xml b/hcatalog/hcatalog-pig-adapter/pom.xml
+index eb1ee94..76c420f 100644
+--- a/hcatalog/hcatalog-pig-adapter/pom.xml
++++ b/hcatalog/hcatalog-pig-adapter/pom.xml
+@@ -25,7 +25,7 @@
+   <parent>
+     <groupId>org.apache.hive.hcatalog</groupId>
+     <artifactId>hive-hcatalog</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/hcatalog/pom.xml b/hcatalog/pom.xml
+index 2da5e1a..05b0f26 100644
+--- a/hcatalog/pom.xml
++++ b/hcatalog/pom.xml
+@@ -24,7 +24,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/hcatalog/server-extensions/pom.xml b/hcatalog/server-extensions/pom.xml
+index 7baea31..57f3727 100644
+--- a/hcatalog/server-extensions/pom.xml
++++ b/hcatalog/server-extensions/pom.xml
+@@ -25,7 +25,7 @@
+   <parent>
+     <groupId>org.apache.hive.hcatalog</groupId>
+     <artifactId>hive-hcatalog</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/hcatalog/streaming/pom.xml b/hcatalog/streaming/pom.xml
+index 5c05598..d93c1f1 100644
+--- a/hcatalog/streaming/pom.xml
++++ b/hcatalog/streaming/pom.xml
+@@ -20,7 +20,7 @@
+   <parent>
+     <groupId>org.apache.hive.hcatalog</groupId>
+     <artifactId>hive-hcatalog</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/hcatalog/webhcat/java-client/pom.xml b/hcatalog/webhcat/java-client/pom.xml
+index 3ac6634..22fdfbc 100644
+--- a/hcatalog/webhcat/java-client/pom.xml
++++ b/hcatalog/webhcat/java-client/pom.xml
+@@ -25,7 +25,7 @@
+   <parent>
+     <groupId>org.apache.hive.hcatalog</groupId>
+     <artifactId>hive-hcatalog</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/hcatalog/webhcat/svr/pom.xml b/hcatalog/webhcat/svr/pom.xml
+index 771de7c..db3f98e 100644
+--- a/hcatalog/webhcat/svr/pom.xml
++++ b/hcatalog/webhcat/svr/pom.xml
+@@ -25,7 +25,7 @@
+   <parent>
+     <groupId>org.apache.hive.hcatalog</groupId>
+     <artifactId>hive-hcatalog</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/hwi/pom.xml b/hwi/pom.xml
+index 5814d62..2202865 100644
+--- a/hwi/pom.xml
++++ b/hwi/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/itests/custom-serde/pom.xml b/itests/custom-serde/pom.xml
+index e4dda12..39da8fe 100644
+--- a/itests/custom-serde/pom.xml
++++ b/itests/custom-serde/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive-it</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/itests/custom-udfs/pom.xml b/itests/custom-udfs/pom.xml
+index 94b3142..e9f24f3 100644
+--- a/itests/custom-udfs/pom.xml
++++ b/itests/custom-udfs/pom.xml
+@@ -19,7 +19,7 @@ limitations under the License.
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive-it</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/itests/custom-udfs/udf-classloader-udf1/pom.xml b/itests/custom-udfs/udf-classloader-udf1/pom.xml
+index fec1cf9..a10ec64 100644
+--- a/itests/custom-udfs/udf-classloader-udf1/pom.xml
++++ b/itests/custom-udfs/udf-classloader-udf1/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive-it-custom-udfs</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/itests/custom-udfs/udf-classloader-udf2/pom.xml b/itests/custom-udfs/udf-classloader-udf2/pom.xml
+index d59d561..897de10 100644
+--- a/itests/custom-udfs/udf-classloader-udf2/pom.xml
++++ b/itests/custom-udfs/udf-classloader-udf2/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive-it-custom-udfs</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/itests/custom-udfs/udf-classloader-util/pom.xml b/itests/custom-udfs/udf-classloader-util/pom.xml
+index f04fdee..87a7544 100644
+--- a/itests/custom-udfs/udf-classloader-util/pom.xml
++++ b/itests/custom-udfs/udf-classloader-util/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive-it-custom-udfs</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/itests/hcatalog-unit/pom.xml b/itests/hcatalog-unit/pom.xml
+index fa2acd2..cfc7076 100644
+--- a/itests/hcatalog-unit/pom.xml
++++ b/itests/hcatalog-unit/pom.xml
+@@ -25,7 +25,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive-it</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/itests/hive-blobstore/pom.xml b/itests/hive-blobstore/pom.xml
+index 1ebd1f7..28482fe 100644
+--- a/itests/hive-blobstore/pom.xml
++++ b/itests/hive-blobstore/pom.xml
+@@ -20,7 +20,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive-it</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/itests/hive-jmh/pom.xml b/itests/hive-jmh/pom.xml
+index dc4bdb5..7253a69 100644
+--- a/itests/hive-jmh/pom.xml
++++ b/itests/hive-jmh/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive-it</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/itests/hive-minikdc/pom.xml b/itests/hive-minikdc/pom.xml
+index e1b13d8..e3356fe 100644
+--- a/itests/hive-minikdc/pom.xml
++++ b/itests/hive-minikdc/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive-it</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/itests/hive-unit-hadoop2/pom.xml b/itests/hive-unit-hadoop2/pom.xml
+index 941c1ef..629ccce 100644
+--- a/itests/hive-unit-hadoop2/pom.xml
++++ b/itests/hive-unit-hadoop2/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive-it</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/itests/hive-unit/pom.xml b/itests/hive-unit/pom.xml
+index ced0744..b6c1357 100644
+--- a/itests/hive-unit/pom.xml
++++ b/itests/hive-unit/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive-it</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/itests/pom.xml b/itests/pom.xml
+index 62581b2..985773e 100644
+--- a/itests/pom.xml
++++ b/itests/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/itests/qtest-spark/pom.xml b/itests/qtest-spark/pom.xml
+index 46580b5..da7e34e 100644
+--- a/itests/qtest-spark/pom.xml
++++ b/itests/qtest-spark/pom.xml
+@@ -20,7 +20,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive-it</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/itests/qtest/pom.xml b/itests/qtest/pom.xml
+index 2789818..6d06908 100644
+--- a/itests/qtest/pom.xml
++++ b/itests/qtest/pom.xml
+@@ -20,7 +20,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive-it</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/itests/test-serde/pom.xml b/itests/test-serde/pom.xml
+index eb9a1dc..0c86900 100644
+--- a/itests/test-serde/pom.xml
++++ b/itests/test-serde/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive-it</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/itests/util/pom.xml b/itests/util/pom.xml
+index 7faf0a0..f8d925f 100644
+--- a/itests/util/pom.xml
++++ b/itests/util/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive-it</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/jdbc/pom.xml b/jdbc/pom.xml
+index d761e56..6987db4 100644
+--- a/jdbc/pom.xml
++++ b/jdbc/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/metastore/pom.xml b/metastore/pom.xml
+index 6c142d8..0c2d286 100644
+--- a/metastore/pom.xml
++++ b/metastore/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/metastore/scripts/upgrade/derby/cdh.upgrade.order.derby b/metastore/scripts/upgrade/derby/cdh.upgrade.order.derby
+index 53fe6fc..e1057ac 100644
+--- a/metastore/scripts/upgrade/derby/cdh.upgrade.order.derby
++++ b/metastore/scripts/upgrade/derby/cdh.upgrade.order.derby
+@@ -1,2 +1,2 @@
+ 1.1.0-to-1.1.0-cdh5.12.0
+-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0
+\ No newline at end of file
++1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.1
+\ No newline at end of file
+diff --git a/metastore/scripts/upgrade/derby/hive-schema-1.1.0.derby.sql b/metastore/scripts/upgrade/derby/hive-schema-1.1.0.derby.sql
+index 43cec1a..3bde8dd 100644
+--- a/metastore/scripts/upgrade/derby/hive-schema-1.1.0.derby.sql
++++ b/metastore/scripts/upgrade/derby/hive-schema-1.1.0.derby.sql
+@@ -339,5 +339,5 @@ ALTER TABLE "APP".VERSION ADD COLUMN SCHEMA_VERSION_V2 VARCHAR(255);
+ -- -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ -- Record schema version. Should be the last step in the init script. Starting CDH-5.12.0 SCHEMA_VERSION_V2 version should record in the CDH specific schema version as well
+ -- -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-INSERT INTO "APP"."VERSION" (VER_ID, SCHEMA_VERSION, SCHEMA_VERSION_V2, VERSION_COMMENT) VALUES (1, '1.1.0', '1.1.0-cdh5.16.0', 'Hive release version 1.1.0');
++INSERT INTO "APP"."VERSION" (VER_ID, SCHEMA_VERSION, SCHEMA_VERSION_V2, VERSION_COMMENT) VALUES (1, '1.1.0', '1.1.0-cdh5.16.1', 'Hive release version 1.1.0');
+ 
+diff --git a/metastore/scripts/upgrade/derby/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.derby.sql b/metastore/scripts/upgrade/derby/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.derby.sql
+index 34dd69b..6630649 100644
+--- a/metastore/scripts/upgrade/derby/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.derby.sql
++++ b/metastore/scripts/upgrade/derby/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.derby.sql
+@@ -1,6 +1,6 @@
+--- Upgrade MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0
++-- Upgrade MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.1
+ 
+ RUN '041-HIVE-19372.derby.sql';
+ RUN '042-HIVE-19605.derby.sql';
+ 
+-UPDATE "APP".VERSION SET SCHEMA_VERSION='1.1.0', VERSION_COMMENT='Hive release version 1.1.0', SCHEMA_VERSION_V2='1.1.0-cdh5.16.0' where VER_ID=1;
++UPDATE "APP".VERSION SET SCHEMA_VERSION='1.1.0', VERSION_COMMENT='Hive release version 1.1.0', SCHEMA_VERSION_V2='1.1.0-cdh5.16.1' where VER_ID=1;
+diff --git a/metastore/scripts/upgrade/mssql/cdh.upgrade.order.mssql b/metastore/scripts/upgrade/mssql/cdh.upgrade.order.mssql
+index 53fe6fc..e1057ac 100644
+--- a/metastore/scripts/upgrade/mssql/cdh.upgrade.order.mssql
++++ b/metastore/scripts/upgrade/mssql/cdh.upgrade.order.mssql
+@@ -1,2 +1,2 @@
+ 1.1.0-to-1.1.0-cdh5.12.0
+-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0
+\ No newline at end of file
++1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.1
+\ No newline at end of file
+diff --git a/metastore/scripts/upgrade/mssql/hive-schema-1.1.0.mssql.sql b/metastore/scripts/upgrade/mssql/hive-schema-1.1.0.mssql.sql
+index 890a78c..aad1916 100644
+--- a/metastore/scripts/upgrade/mssql/hive-schema-1.1.0.mssql.sql
++++ b/metastore/scripts/upgrade/mssql/hive-schema-1.1.0.mssql.sql
+@@ -950,4 +950,4 @@ ALTER TABLE VERSION ADD SCHEMA_VERSION_V2 VARCHAR(255);
+ -- -----------------------------------------------------------------------------------------------------------------------------------------
+ -- Record schema version. Should be the last step in the init script. Starting CDH-5.13.0 CDH version must be included in the schema version
+ -- -----------------------------------------------------------------------------------------------------------------------------------------
+-INSERT INTO VERSION (VER_ID, SCHEMA_VERSION, SCHEMA_VERSION_V2, VERSION_COMMENT) VALUES (1, '1.1.0', '1.1.0-cdh5.16.0', 'Hive release version 1.1.0');
++INSERT INTO VERSION (VER_ID, SCHEMA_VERSION, SCHEMA_VERSION_V2, VERSION_COMMENT) VALUES (1, '1.1.0', '1.1.0-cdh5.16.1', 'Hive release version 1.1.0');
+diff --git a/metastore/scripts/upgrade/mssql/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.msssql.sql b/metastore/scripts/upgrade/mssql/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.msssql.sql
+index b7683bf..d04fc0c 100644
+--- a/metastore/scripts/upgrade/mssql/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.msssql.sql
++++ b/metastore/scripts/upgrade/mssql/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.msssql.sql
+@@ -1,7 +1,7 @@
+-SELECT 'Upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0' AS MESSAGE;
++SELECT 'Upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.1' AS MESSAGE;
+ 
+ :r 026-HIVE-19372.mssql.sql
+ :r 027-HIVE-19605.mssql.sql
+ 
+-UPDATE VERSION SET SCHEMA_VERSION='1.1.0', VERSION_COMMENT='Hive release version 1.1.0', SCHEMA_VERSION_V2='1.1.0-cdh5.16.0' where VER_ID=1;
+-SELECT 'Finished upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0' AS MESSAGE;
++UPDATE VERSION SET SCHEMA_VERSION='1.1.0', VERSION_COMMENT='Hive release version 1.1.0', SCHEMA_VERSION_V2='1.1.0-cdh5.16.1' where VER_ID=1;
++SELECT 'Finished upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.1' AS MESSAGE;
+diff --git a/metastore/scripts/upgrade/mysql/cdh.upgrade.order.mysql b/metastore/scripts/upgrade/mysql/cdh.upgrade.order.mysql
+index 53fe6fc..e1057ac 100644
+--- a/metastore/scripts/upgrade/mysql/cdh.upgrade.order.mysql
++++ b/metastore/scripts/upgrade/mysql/cdh.upgrade.order.mysql
+@@ -1,2 +1,2 @@
+ 1.1.0-to-1.1.0-cdh5.12.0
+-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0
+\ No newline at end of file
++1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.1
+\ No newline at end of file
+diff --git a/metastore/scripts/upgrade/mysql/hive-schema-1.1.0.mysql.sql b/metastore/scripts/upgrade/mysql/hive-schema-1.1.0.mysql.sql
+index f09bff0..879fcc7 100644
+--- a/metastore/scripts/upgrade/mysql/hive-schema-1.1.0.mysql.sql
++++ b/metastore/scripts/upgrade/mysql/hive-schema-1.1.0.mysql.sql
+@@ -832,7 +832,7 @@ ALTER TABLE VERSION ADD COLUMN SCHEMA_VERSION_V2 VARCHAR(255);
+ -- ------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ -- Record schema version. Should be the last step in the init script. Starting CDH-5.12.0 the CDH specific schema version should also be recored in SCHEMA_VERSION_V2
+ -- ------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-INSERT INTO VERSION (VER_ID, SCHEMA_VERSION, SCHEMA_VERSION_V2, VERSION_COMMENT) VALUES (1, '1.1.0', '1.1.0-cdh5.16.0', 'Hive release version 1.1.0');
++INSERT INTO VERSION (VER_ID, SCHEMA_VERSION, SCHEMA_VERSION_V2, VERSION_COMMENT) VALUES (1, '1.1.0', '1.1.0-cdh5.16.1', 'Hive release version 1.1.0');
+ 
+ /*!40101 SET character_set_client = @saved_cs_client */;
+ /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
+diff --git a/metastore/scripts/upgrade/mysql/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.mysql.sql b/metastore/scripts/upgrade/mysql/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.mysql.sql
+index 62f9779..607ce55 100644
+--- a/metastore/scripts/upgrade/mysql/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.mysql.sql
++++ b/metastore/scripts/upgrade/mysql/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.mysql.sql
+@@ -1,7 +1,7 @@
+--- Upgrade MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0
++-- Upgrade MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.1
+ 
+ SOURCE 041-HIVE-19372.mysql.sql;
+ SOURCE 042-HIVE-19605.mysql.sql;
+ 
+-UPDATE VERSION SET SCHEMA_VERSION='1.1.0', VERSION_COMMENT='Hive release version 1.1.0', SCHEMA_VERSION_V2='1.1.0-cdh5.16.0' where VER_ID=1;
+-SELECT 'Finished upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0' AS ' ';
++UPDATE VERSION SET SCHEMA_VERSION='1.1.0', VERSION_COMMENT='Hive release version 1.1.0', SCHEMA_VERSION_V2='1.1.0-cdh5.16.1' where VER_ID=1;
++SELECT 'Finished upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.1' AS ' ';
+diff --git a/metastore/scripts/upgrade/oracle/cdh.upgrade.order.oracle b/metastore/scripts/upgrade/oracle/cdh.upgrade.order.oracle
+index 53fe6fc..e1057ac 100644
+--- a/metastore/scripts/upgrade/oracle/cdh.upgrade.order.oracle
++++ b/metastore/scripts/upgrade/oracle/cdh.upgrade.order.oracle
+@@ -1,2 +1,2 @@
+ 1.1.0-to-1.1.0-cdh5.12.0
+-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0
+\ No newline at end of file
++1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.1
+\ No newline at end of file
+diff --git a/metastore/scripts/upgrade/oracle/hive-schema-1.1.0.oracle.sql b/metastore/scripts/upgrade/oracle/hive-schema-1.1.0.oracle.sql
+index 8481a65..22cb076 100644
+--- a/metastore/scripts/upgrade/oracle/hive-schema-1.1.0.oracle.sql
++++ b/metastore/scripts/upgrade/oracle/hive-schema-1.1.0.oracle.sql
+@@ -793,4 +793,4 @@ ALTER TABLE VERSION ADD SCHEMA_VERSION_V2 VARCHAR2(255);
+ -- -----------------------------------------------------------------
+ -- Record schema version. Should be the last step in the init script. Starting CDH5.12.0 SCHEMA_VERSION_V2 must include the CDH schema version as well
+ -- -----------------------------------------------------------------
+-INSERT INTO VERSION (VER_ID, SCHEMA_VERSION, SCHEMA_VERSION_V2, VERSION_COMMENT) VALUES (1, '1.1.0', '1.1.0-cdh5.16.0', 'Hive release version 1.1.0');
++INSERT INTO VERSION (VER_ID, SCHEMA_VERSION, SCHEMA_VERSION_V2, VERSION_COMMENT) VALUES (1, '1.1.0', '1.1.0-cdh5.16.1', 'Hive release version 1.1.0');
+diff --git a/metastore/scripts/upgrade/oracle/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.oracle.sql b/metastore/scripts/upgrade/oracle/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.oracle.sql
+index e6f0d1e..0aaba50 100644
+--- a/metastore/scripts/upgrade/oracle/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.oracle.sql
++++ b/metastore/scripts/upgrade/oracle/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.oracle.sql
+@@ -1,7 +1,7 @@
+--- Upgrade MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0
++-- Upgrade MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.1
+ 
+ @041-HIVE-19372.oracle.sql;
+ @042-HIVE-19605.oracle.sql;
+ 
+-UPDATE VERSION SET SCHEMA_VERSION='1.1.0', VERSION_COMMENT='Hive release version 1.1.0', SCHEMA_VERSION_V2='1.1.0-cdh5.16.0' where VER_ID=1;
+-SELECT 'Finished upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0' AS Status from dual;
++UPDATE VERSION SET SCHEMA_VERSION='1.1.0', VERSION_COMMENT='Hive release version 1.1.0', SCHEMA_VERSION_V2='1.1.0-cdh5.16.1' where VER_ID=1;
++SELECT 'Finished upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.1' AS Status from dual;
+diff --git a/metastore/scripts/upgrade/postgres/cdh.upgrade.order.postgres b/metastore/scripts/upgrade/postgres/cdh.upgrade.order.postgres
+index 53fe6fc..e1057ac 100644
+--- a/metastore/scripts/upgrade/postgres/cdh.upgrade.order.postgres
++++ b/metastore/scripts/upgrade/postgres/cdh.upgrade.order.postgres
+@@ -1,2 +1,2 @@
+ 1.1.0-to-1.1.0-cdh5.12.0
+-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0
+\ No newline at end of file
++1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.1
+\ No newline at end of file
+diff --git a/metastore/scripts/upgrade/postgres/hive-schema-1.1.0.postgres.sql b/metastore/scripts/upgrade/postgres/hive-schema-1.1.0.postgres.sql
+index 4fe21a6..092fb97 100644
+--- a/metastore/scripts/upgrade/postgres/hive-schema-1.1.0.postgres.sql
++++ b/metastore/scripts/upgrade/postgres/hive-schema-1.1.0.postgres.sql
+@@ -1498,4 +1498,4 @@ ALTER TABLE "VERSION" ADD COLUMN "SCHEMA_VERSION_V2" VARCHAR(255);
+ -- ------------------------------------------------------------------------------------------------------------------------------
+ -- Record schema version. Should be the last step in the init script. Starting CDH-5.12.0 SCHEMA_VERSION_V2 must include CDH schema version as well
+ -- ------------------------------------------------------------------------------------------------------------------------------
+-INSERT INTO "VERSION" ("VER_ID", "SCHEMA_VERSION", "SCHEMA_VERSION_V2", "VERSION_COMMENT") VALUES (1, '1.1.0', '1.1.0-cdh5.16.0', 'Hive release version 1.1.0');
++INSERT INTO "VERSION" ("VER_ID", "SCHEMA_VERSION", "SCHEMA_VERSION_V2", "VERSION_COMMENT") VALUES (1, '1.1.0', '1.1.0-cdh5.16.1', 'Hive release version 1.1.0');
+diff --git a/metastore/scripts/upgrade/postgres/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.postgres.sql b/metastore/scripts/upgrade/postgres/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.postgres.sql
+index 3d9a8ee..b359eda 100644
+--- a/metastore/scripts/upgrade/postgres/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.postgres.sql
++++ b/metastore/scripts/upgrade/postgres/upgrade-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0.postgres.sql
+@@ -1,7 +1,7 @@
+-SELECT 'Upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0';
++SELECT 'Upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.1';
+ 
+ \i 040-HIVE-19372.postgres.sql;
+ \i 041-HIVE-19605.postgres.sql;
+ 
+-UPDATE "VERSION" SET "SCHEMA_VERSION"='1.1.0', "VERSION_COMMENT"='Hive release version 1.1.0', "SCHEMA_VERSION_V2"='1.1.0-cdh5.16.0' where "VER_ID"=1;
+-SELECT 'Finished upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.0';
++UPDATE "VERSION" SET "SCHEMA_VERSION"='1.1.0', "VERSION_COMMENT"='Hive release version 1.1.0', "SCHEMA_VERSION_V2"='1.1.0-cdh5.16.1' where "VER_ID"=1;
++SELECT 'Finished upgrading MetaStore schema from 1.1.0-cdh5.12.0 to 1.1.0-cdh5.16.1';
+diff --git a/odbc/pom.xml b/odbc/pom.xml
+index 9b467dc..4c7dbdb 100644
+--- a/odbc/pom.xml
++++ b/odbc/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/packaging/pom.xml b/packaging/pom.xml
+index 3669e21..0791db5 100644
+--- a/packaging/pom.xml
++++ b/packaging/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/pom.xml b/pom.xml
+index a3f2a1b..33cd42c 100644
+--- a/pom.xml
++++ b/pom.xml
+@@ -17,12 +17,12 @@
+   <parent>
+     <groupId>com.cloudera.cdh</groupId>
+     <artifactId>cdh-root</artifactId>
+-    <version>5.16.0</version>
++    <version>5.16.1</version>
+   </parent>
+ 
+   <groupId>org.apache.hive</groupId>
+   <artifactId>hive</artifactId>
+-  <version>1.1.0-cdh5.16.0</version>
++  <version>1.1.0-cdh5.16.1</version>
+   <packaging>pom</packaging>
+ 
+   <name>Hive</name>
+@@ -55,7 +55,7 @@
+   </modules>
+ 
+   <properties>
+-    <cdh.hive.version>1.1.0-cdh5.16.0</cdh.hive.version>
++    <cdh.hive.version>1.1.0-cdh5.16.1</cdh.hive.version>
+     <hive.version.shortname>1.1.0</hive.version.shortname>
+ 
+     <!-- Build Properties -->
+diff --git a/ql/pom.xml b/ql/pom.xml
+index a27e8c7..f59e3c9 100644
+--- a/ql/pom.xml
++++ b/ql/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/serde/pom.xml b/serde/pom.xml
+index ddfd6e7..33ddeff 100644
+--- a/serde/pom.xml
++++ b/serde/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/service/pom.xml b/service/pom.xml
+index 52187c7..22e6e86 100644
+--- a/service/pom.xml
++++ b/service/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/shims/0.20S/pom.xml b/shims/0.20S/pom.xml
+index 897b9cc..ed1b917 100644
+--- a/shims/0.20S/pom.xml
++++ b/shims/0.20S/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/shims/0.23/pom.xml b/shims/0.23/pom.xml
+index 1c76e59..7febf9f 100644
+--- a/shims/0.23/pom.xml
++++ b/shims/0.23/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/shims/aggregator/pom.xml b/shims/aggregator/pom.xml
+index 4bbeb25..8bf1b31 100644
+--- a/shims/aggregator/pom.xml
++++ b/shims/aggregator/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/shims/common/pom.xml b/shims/common/pom.xml
+index a8f624e..33a5df4 100644
+--- a/shims/common/pom.xml
++++ b/shims/common/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/shims/pom.xml b/shims/pom.xml
+index 9b49f42..05217b6 100644
+--- a/shims/pom.xml
++++ b/shims/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/shims/scheduler/pom.xml b/shims/scheduler/pom.xml
+index 48a6ab9..676565a 100644
+--- a/shims/scheduler/pom.xml
++++ b/shims/scheduler/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/spark-client/pom.xml b/spark-client/pom.xml
+index 77c1c3b..19b0b41 100644
+--- a/spark-client/pom.xml
++++ b/spark-client/pom.xml
+@@ -22,7 +22,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+   </parent>
+ 
+   <groupId>org.apache.hive</groupId>
+diff --git a/testutils/pom.xml b/testutils/pom.xml
+index 2d3044a..736dc7c 100644
+--- a/testutils/pom.xml
++++ b/testutils/pom.xml
+@@ -19,7 +19,7 @@
+   <parent>
+     <groupId>org.apache.hive</groupId>
+     <artifactId>hive</artifactId>
+-    <version>1.1.0-cdh5.16.0</version>
++    <version>1.1.0-cdh5.16.1</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+-- 
+1.7.9.5
+

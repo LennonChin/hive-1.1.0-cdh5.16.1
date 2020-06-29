@@ -1,0 +1,32 @@
+From d1ba7ca8af8831c2c00fb4250fe4e2381cd264fe Mon Sep 17 00:00:00 2001
+From: Aihua Xu <aihuaxu@apache.org>
+Date: Wed, 8 Aug 2018 18:37:54 -0700
+Subject: [PATCH 1417/1431] CDH-72209: HIVE-20345: Drop database may hang if
+ the tables get deleted from a different call
+ (Aihua Xu, reviewed by Naveen Gangam)
+ ==C5_APPROVED_BUGFIX== Change-Id:
+ I01cf63850340b797e1b7abb7d3341903068771eb
+
+---
+ .../hadoop/hive/metastore/HiveMetaStore.java       |    4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java b/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java
+index 4fa8970..735633b 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java
+@@ -1193,9 +1193,9 @@ private void drop_database_core(RawStore ms,
+               // Drop the table but not its data
+               drop_table(name, table.getTableName(), false);
+             }
+-
+-            startIndex = endIndex;
+           }
++
++          startIndex = endIndex;
+         }
+ 
+         if (ms.dropDatabase(name)) {
+-- 
+1.7.9.5
+

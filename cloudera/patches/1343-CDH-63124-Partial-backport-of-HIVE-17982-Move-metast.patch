@@ -1,0 +1,97 @@
+From f24dc046289ccff403d975421ae3538ce14df144 Mon Sep 17 00:00:00 2001
+From: Peter Vary <pvary@cloudera.com>
+Date: Fri, 26 Jan 2018 13:58:55 +0100
+Subject: [PATCH 1343/1431] CDH-63124: Partial backport of HIVE-17982 Move
+ metastore specific itests. This closes #279.
+ (Alan Gates, reviewed by Peter Vary)           
+ Only builder related changes
+
+Change-Id: If20af2486e3d164792ea4b53147564fcfc343475
+(cherry picked from commit dd0ea7ef1d25b27423a14669bfedaf5b974d6441)
+---
+ .../metastore/client/builder/IndexBuilder.java     |    5 +++++
+ .../metastore/client/builder/PartitionBuilder.java |    3 ++-
+ .../metastore/client/builder/TableBuilder.java     |   12 +++++++++++-
+ 3 files changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/IndexBuilder.java b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/IndexBuilder.java
+index 6c8b1d8..50fc186 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/IndexBuilder.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/IndexBuilder.java
+@@ -73,6 +73,11 @@ public IndexBuilder setIndexParams(Map<String, String> indexParams) {
+     return this;
+   }
+ 
++  public IndexBuilder addIndexParam(String key, String value) {
++    indexParams.put(key, value);
++    return this;
++  }
++
+   public IndexBuilder setIndexName(String indexName) {
+     this.indexName = indexName;
+     return this;
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/PartitionBuilder.java b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/PartitionBuilder.java
+index 265625f..38e5a8f 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/PartitionBuilder.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/PartitionBuilder.java
+@@ -53,9 +53,10 @@ public PartitionBuilder setTableName(String tableName) {
+     return this;
+   }
+ 
+-  public PartitionBuilder setDbAndTableName(Table table) {
++  public PartitionBuilder fromTable(Table table) {
+     this.dbName = table.getDbName();
+     this.tableName = table.getTableName();
++    setCols(table.getSd().getCols());
+     return this;
+   }
+ 
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/TableBuilder.java b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/TableBuilder.java
+index 10c932c..2498515 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/TableBuilder.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/client/builder/TableBuilder.java
+@@ -18,8 +18,10 @@
+ package org.apache.hadoop.hive.metastore.client.builder;
+ 
+ import org.apache.hadoop.hive.metastore.MetaStoreUtils;
++import org.apache.hadoop.hive.metastore.TableType;
+ import org.apache.hadoop.hive.metastore.api.Database;
+ import org.apache.hadoop.hive.metastore.api.FieldSchema;
++import org.apache.hadoop.hive.metastore.api.Index;
+ import org.apache.hadoop.hive.metastore.api.MetaException;
+ import org.apache.hadoop.hive.metastore.api.Table;
+ import org.apache.hadoop.hive.metastore.utils.SecurityUtils;
+@@ -46,6 +48,8 @@ public TableBuilder() {
+     tableParams = new HashMap<>();
+     createTime = lastAccessTime = (int)(System.currentTimeMillis() / 1000);
+     retention = 0;
++    partCols = new ArrayList<>();
++    type = TableType.MANAGED_TABLE.name();
+     super.setChild(this);
+   }
+ 
+@@ -90,7 +94,6 @@ public TableBuilder setPartCols(List<FieldSchema> partCols) {
+   }
+ 
+   public TableBuilder addPartCol(String name, String type, String comment) {
+-    if (partCols == null) partCols = new ArrayList<>();
+     partCols.add(new FieldSchema(name, type, comment));
+     return this;
+   }
+@@ -135,6 +138,13 @@ public TableBuilder setTemporary(boolean temporary) {
+     return this;
+   }
+ 
++  public TableBuilder fromIndex(Index index) {
++    dbName = index.getDbName();
++    tableName = index.getIndexTableName();
++    setCols(index.getSd().getCols());
++    return this;
++  }
++
+   public Table build() throws MetaException {
+     if (dbName == null || tableName == null) {
+       throw new MetaException("You must set the database and table name");
+-- 
+1.7.9.5
+

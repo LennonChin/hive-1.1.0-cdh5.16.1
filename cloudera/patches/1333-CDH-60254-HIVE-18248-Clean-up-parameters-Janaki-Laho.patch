@@ -1,0 +1,605 @@
+From ce2167c985477c669db216c2878ec035b7061e34 Mon Sep 17 00:00:00 2001
+From: Janaki Lahorani <janaki@cloudera.com>
+Date: Tue, 19 Dec 2017 17:11:20 -0800
+Subject: [PATCH 1333/1431] CDH-60254: HIVE-18248: Clean up parameters (Janaki
+ Lahorani, reviewed by Sahil Takiar)
+
+Change-Id: Ibabb4ba32819e694a766b7ce3d30c3dfdbd4c93a
+---
+ .../java/org/apache/hadoop/hive/conf/HiveConf.java |    9 +-
+ data/conf/rlist/hive-site.xml                      |  264 ++++++++++++++++++++
+ data/conf/rlist/hivemetastore-site.xml             |   35 +++
+ .../org/apache/hive/jdbc/TestRestrictedList.java   |  162 ++++++++++++
+ .../hadoop/hive/ql/session/SessionState.java       |    7 +
+ .../clientnegative/change_hive_hdfs_session_path.q |    2 +
+ .../change_hive_local_session_path.q               |    2 +
+ .../clientnegative/change_hive_tmp_table_space.q   |    2 +
+ .../change_hive_hdfs_session_path.q.out            |    2 +
+ .../change_hive_local_session_path.q.out           |    2 +
+ .../change_hive_tmp_table_space.q.out              |    2 +
+ 11 files changed, 488 insertions(+), 1 deletion(-)
+ create mode 100644 data/conf/rlist/hive-site.xml
+ create mode 100644 data/conf/rlist/hivemetastore-site.xml
+ create mode 100644 itests/hive-unit/src/test/java/org/apache/hive/jdbc/TestRestrictedList.java
+ create mode 100644 ql/src/test/queries/clientnegative/change_hive_hdfs_session_path.q
+ create mode 100644 ql/src/test/queries/clientnegative/change_hive_local_session_path.q
+ create mode 100644 ql/src/test/queries/clientnegative/change_hive_tmp_table_space.q
+ create mode 100644 ql/src/test/results/clientnegative/change_hive_hdfs_session_path.q.out
+ create mode 100644 ql/src/test/results/clientnegative/change_hive_local_session_path.q.out
+ create mode 100644 ql/src/test/results/clientnegative/change_hive_tmp_table_space.q.out
+
+diff --git a/common/src/java/org/apache/hadoop/hive/conf/HiveConf.java b/common/src/java/org/apache/hadoop/hive/conf/HiveConf.java
+index 2180c07..130fd35 100644
+--- a/common/src/java/org/apache/hadoop/hive/conf/HiveConf.java
++++ b/common/src/java/org/apache/hadoop/hive/conf/HiveConf.java
+@@ -1984,7 +1984,10 @@ public void setSparkConfigUpdated(boolean isSparkConfigUpdated) {
+         "This setting takes effect only if session idle timeout (hive.server2.idle.session.timeout) and checking\n" +
+         "(hive.server2.session.check.interval) are enabled."),
+     HIVE_CONF_RESTRICTED_LIST("hive.conf.restricted.list",
+-        "hive.security.authenticator.manager,hive.security.authorization.manager,hive.users.in.admin.role",
++        "hive.security.authenticator.manager,hive.security.authorization.manager," +
++        "hive.users.in.admin.role," +
++        "hadoop.bin.path," +
++        "yarn.bin.path",
+         "Comma separated list of configuration options which are immutable at runtime"),
+     HIVE_CONF_HIDDEN_LIST("hive.conf.hidden.list",
+         METASTOREPWD.varname + "," + HIVE_SERVER2_SSL_KEYSTORE_PASSWORD.varname
+@@ -3113,6 +3116,10 @@ public static void setHiveSiteLocation(URL location) {
+     hiveSiteURL = location;
+   }
+ 
++  public static void setHivemetastoreSiteUrl(URL location) {
++    hivemetastoreSiteUrl = location;
++  }
++
+   public static URL getHiveSiteLocation() {
+     return hiveSiteURL;
+   }
+diff --git a/data/conf/rlist/hive-site.xml b/data/conf/rlist/hive-site.xml
+new file mode 100644
+index 0000000..1b7c1f4
+--- /dev/null
++++ b/data/conf/rlist/hive-site.xml
+@@ -0,0 +1,264 @@
++<?xml version="1.0"?>
++<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
++<!--
++   Licensed to the Apache Software Foundation (ASF) under one or more
++   contributor license agreements.  See the NOTICE file distributed with
++   this work for additional information regarding copyright ownership.
++   The ASF licenses this file to You under the Apache License, Version 2.0
++   (the "License"); you may not use this file except in compliance with
++   the License.  You may obtain a copy of the License at
++
++       http://www.apache.org/licenses/LICENSE-2.0
++
++   Unless required by applicable law or agreed to in writing, software
++   distributed under the License is distributed on an "AS IS" BASIS,
++   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++   See the License for the specific language governing permissions and
++   limitations under the License.
++-->
++
++<configuration>
++
++<property>
++  <name>hive.in.test</name>
++  <value>true</value>
++  <description>Internal marker for test. Used for masking env-dependent values</description>
++</property>
++
++<!-- Hive Configuration can either be stored in this file or in the hadoop configuration files  -->
++<!-- that are implied by Hadoop setup variables.                                                -->
++<!-- Aside from Hadoop setup variables - this file is provided as a convenience so that Hive    -->
++<!-- users do not have to edit hadoop configuration files (that may be managed as a centralized -->
++<!-- resource).                                                                                 -->
++
++<!-- Hive Execution Parameters -->
++<property>
++  <name>hadoop.tmp.dir</name>
++  <value>${test.tmp.dir}/hadoop-tmp</value>
++  <description>A base for other temporary directories.</description>
++</property>
++
++<property>
++  <name>mapreduce.jobtracker.staging.root.dir</name>
++  <value>${test.tmp.dir}/hadoop-tmp</value>
++  <description>A base for other temporary directories.</description>
++</property>
++
++<!--
++<property>
++  <name>hive.exec.reducers.max</name>
++  <value>1</value>
++  <description>maximum number of reducers</description>
++</property>
++-->
++
++<property>
++  <name>hive.exec.scratchdir</name>
++  <value>${test.tmp.dir}/scratchdir</value>
++  <description>Scratch space for Hive jobs</description>
++</property>
++
++<property>
++  <name>hive.exec.local.scratchdir</name>
++  <value>${test.tmp.dir}/localscratchdir/</value>
++  <description>Local scratch space for Hive jobs</description>
++</property>
++
++<property>
++  <name>javax.jdo.option.ConnectionURL</name>
++  <value>jdbc:derby:;databaseName=${test.tmp.dir}/junit_metastore_db;create=true</value>
++</property>
++
++<property>
++  <name>hive.stats.dbconnectionstring</name>
++  <value>jdbc:derby:;databaseName=${test.tmp.dir}/TempStatsStore;create=true</value>
++</property>
++
++
++<property>
++  <name>javax.jdo.option.ConnectionDriverName</name>
++  <value>org.apache.derby.jdbc.EmbeddedDriver</value>
++</property>
++
++<property>
++  <name>javax.jdo.option.ConnectionUserName</name>
++  <value>APP</value>
++</property>
++
++<property>
++  <name>javax.jdo.option.ConnectionPassword</name>
++  <value>mine</value>
++</property>
++
++<property>
++  <!--  this should eventually be deprecated since the metastore should supply this -->
++  <name>hive.metastore.warehouse.dir</name>
++  <value>${test.warehouse.dir}</value>
++  <description></description>
++</property>
++
++<property>
++  <name>hive.metastore.metadb.dir</name>
++  <value>file://${test.tmp.dir}/metadb/</value>
++  <description>
++  Required by metastore server or if the uris argument below is not supplied
++  </description>
++</property>
++
++<property>
++  <name>test.log.dir</name>
++  <value>${test.tmp.dir}/log/</value>
++  <description></description>
++</property>
++
++<property>
++  <name>test.data.files</name>
++  <value>${hive.root}/data/files</value>
++  <description></description>
++</property>
++
++<property>
++  <name>test.data.scripts</name>
++  <value>${hive.root}/data/scripts</value>
++  <description></description>
++</property>
++
++<property>
++  <name>hive.jar.path</name>
++  <value>${maven.local.repository}/org/apache/hive/hive-exec/${hive.version}/hive-exec-${hive.version}.jar</value>
++  <description></description>
++</property>
++
++<property>
++  <name>hive.metastore.rawstore.impl</name>
++  <value>org.apache.hadoop.hive.metastore.ObjectStore</value>
++  <description>Name of the class that implements org.apache.hadoop.hive.metastore.rawstore interface. This class is used to store and retrieval of raw metadata objects such as table, database</description>
++</property>
++
++<property>
++  <name>hive.querylog.location</name>
++  <value>${test.tmp.dir}/tmp</value>
++  <description>Location of the structured hive logs</description>
++</property>
++
++<property>
++  <name>hive.exec.pre.hooks</name>
++  <value>org.apache.hadoop.hive.ql.hooks.PreExecutePrinter, org.apache.hadoop.hive.ql.hooks.EnforceReadOnlyTables</value>
++  <description>Pre Execute Hook for Tests</description>
++</property>
++
++<property>
++  <name>hive.exec.post.hooks</name>
++  <value>org.apache.hadoop.hive.ql.hooks.PostExecutePrinter</value>
++  <description>Post Execute Hook for Tests</description>
++</property>
++
++<property>
++  <name>hive.support.concurrency</name>
++  <value>true</value>
++  <description>Whether hive supports concurrency or not. A zookeeper instance must be up and running for the default hive lock manager to support read-write locks.</description>
++</property>
++
++<property>
++  <key>hive.unlock.numretries</key>
++  <value>2</value>
++  <description>The number of times you want to retry to do one unlock</description>
++</property>
++
++<property>
++  <key>hive.lock.sleep.between.retries</key>
++  <value>2</value>
++  <description>The sleep time (in seconds) between various retries</description>
++</property>
++
++
++<property>
++  <name>fs.pfile.impl</name>
++  <value>org.apache.hadoop.fs.ProxyLocalFileSystem</value>
++  <description>A proxy for local file system used for cross file system testing</description>
++</property>
++
++<property>
++  <name>hive.exec.mode.local.auto</name>
++  <value>false</value>
++  <description>
++    Let hive determine whether to run in local mode automatically
++    Disabling this for tests so that minimr is not affected
++  </description>
++</property>
++
++<property>
++  <name>hive.auto.convert.join</name>
++  <value>false</value>
++  <description>Whether Hive enable the optimization about converting common join into mapjoin based on the input file size</description>
++</property>
++
++<property>
++  <name>hive.ignore.mapjoin.hint</name>
++  <value>false</value>
++  <description>Whether Hive ignores the mapjoin hint</description>
++</property>
++
++<property>
++  <name>hive.input.format</name>
++  <value>org.apache.hadoop.hive.ql.io.CombineHiveInputFormat</value>
++  <description>The default input format, if it is not specified, the system assigns it. It is set to HiveInputFormat for hadoop versions 17, 18 and 19, whereas it is set to CombineHiveInputFormat for hadoop 20. The user can always overwrite it - if there is a bug in CombineHiveInputFormat, it can always be manually set to HiveInputFormat. </description>
++</property>
++
++<property>
++  <name>hive.default.rcfile.serde</name>
++  <value>org.apache.hadoop.hive.serde2.columnar.ColumnarSerDe</value>
++  <description>The default SerDe hive will use for the rcfile format</description>
++</property>
++
++<property>
++  <name>hive.stats.dbclass</name>
++  <value>jdbc:derby</value>
++  <description>The storage for temporary stats generated by tasks. Currently, jdbc, hbase and counter types are supported</description>
++</property>
++
++<property>
++  <name>hive.stats.key.prefix.reserve.length</name>
++  <value>0</value>
++</property>
++
++<property>
++  <name>hive.exec.submit.local.task.via.child</name>
++  <value>false</value>
++</property>
++
++<property>
++  <name>hive.dummyparam.test.server.specific.config.override</name>
++  <value>from.hive-site.xml</value>
++  <description>Using dummy param to test server specific configuration</description>
++</property>
++
++<property>
++  <name>hive.dummyparam.test.server.specific.config.hivesite</name>
++  <value>from.hive-site.xml</value>
++  <description>Using dummy param to test server specific configuration</description>
++</property>
++
++<property>
++  <name>hive.ql.log.PerfLogger.level</name>
++  <value>WARN,DRFA</value>
++  <description>Used to change the perflogger level</description>
++</property>
++
++<property>
++  <name>hive.fetch.task.conversion</name>
++  <value>minimal</value>
++</property>
++
++<property>
++  <name>hive.users.in.admin.role</name>
++  <value>hive_admin_user</value>
++</property>
++
++<property>
++  <name>hive.security.authorization.task.factory</name>
++  <value>org.apache.hadoop.hive.ql.parse.authorization.HiveAuthorizationTaskFactoryImpl</value>
++  <description>The default SerDe hive will use for the rcfile format</description>
++</property>
++
++</configuration>
+diff --git a/data/conf/rlist/hivemetastore-site.xml b/data/conf/rlist/hivemetastore-site.xml
+new file mode 100644
+index 0000000..d1a5a28
+--- /dev/null
++++ b/data/conf/rlist/hivemetastore-site.xml
+@@ -0,0 +1,35 @@
++<?xml version="1.0"?>
++<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
++<!--
++   Licensed to the Apache Software Foundation (ASF) under one or more
++   contributor license agreements.  See the NOTICE file distributed with
++   this work for additional information regarding copyright ownership.
++   The ASF licenses this file to You under the Apache License, Version 2.0
++   (the "License"); you may not use this file except in compliance with
++   the License.  You may obtain a copy of the License at
++
++       http://www.apache.org/licenses/LICENSE-2.0
++
++   Unless required by applicable law or agreed to in writing, software
++   distributed under the License is distributed on an "AS IS" BASIS,
++   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++   See the License for the specific language governing permissions and
++   limitations under the License.
++-->
++
++<configuration>
++
++
++<property>
++  <name>hive.dummyparam.test.server.specific.config.override</name>
++  <value>from.hivemetastore-site.xml</value>
++  <description>Using dummy param to test server specific configuration</description>
++</property>
++
++<property>
++  <name>hive.dummyparam.test.server.specific.config.metastoresite</name>
++  <value>from.hivemetastore-site.xml</value>
++  <description>Using dummy param to test server specific configuration</description>
++</property>
++
++</configuration>
+diff --git a/itests/hive-unit/src/test/java/org/apache/hive/jdbc/TestRestrictedList.java b/itests/hive-unit/src/test/java/org/apache/hive/jdbc/TestRestrictedList.java
+new file mode 100644
+index 0000000..10924e7
+--- /dev/null
++++ b/itests/hive-unit/src/test/java/org/apache/hive/jdbc/TestRestrictedList.java
+@@ -0,0 +1,162 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ * http://www.apache.org/licenses/LICENSE-2.0
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.hive.jdbc;
++
++import java.io.File;
++import java.net.URL;
++import java.sql.Connection;
++import java.sql.DriverManager;
++import java.sql.Statement;
++import java.util.HashMap;
++import java.util.Map;
++import java.util.Set;
++import java.util.HashSet;
++
++import org.apache.hadoop.hive.conf.HiveConf;
++import org.apache.hadoop.hive.conf.HiveConf.ConfVars;
++import org.apache.hive.jdbc.miniHS2.MiniHS2;
++import org.junit.AfterClass;
++import org.junit.BeforeClass;
++
++import org.junit.Test;
++
++import static org.junit.Assert.assertTrue;
++import static org.junit.Assert.fail;
++
++public class TestRestrictedList {
++  private static MiniHS2 miniHS2 = null;
++  private static URL oldHiveSiteURL = null;
++  private static URL oldHiveMetastoreSiteURL = null;
++  private static Map<String, String> expectedRestrictedMap = new HashMap<>();
++  private static HiveConf hiveConf = null;
++
++  @BeforeClass
++  public static void startServices() throws Exception {
++    Class.forName(MiniHS2.getJdbcDriverName());
++
++    oldHiveSiteURL = HiveConf.getHiveSiteLocation();
++    oldHiveMetastoreSiteURL = HiveConf.getMetastoreSiteLocation();
++    String confDir = "../../data/conf/rlist/";
++    HiveConf.setHiveSiteLocation(
++        new URL("file://" + new File(confDir).toURI().getPath() + "/hive-site.xml"));
++    System.out.println("Setting hive-site: " + HiveConf.getHiveSiteLocation());
++    HiveConf.setHivemetastoreSiteUrl(
++        new URL("file://" + new File(confDir).toURI().getPath() + "/hivemetastore-site.xml"));
++    System.out.println("Setting hive-site: " + HiveConf.getHiveSiteLocation());
++
++    hiveConf = new HiveConf();
++    hiveConf.setIntVar(ConfVars.HIVE_SERVER2_THRIFT_MIN_WORKER_THREADS, 1);
++    hiveConf.setIntVar(ConfVars.HIVE_SERVER2_THRIFT_MAX_WORKER_THREADS, 1);
++    hiveConf.setBoolVar(ConfVars.HIVE_SUPPORT_CONCURRENCY, false);
++
++    miniHS2 = new MiniHS2.Builder().withMiniMR().withRemoteMetastore().withConf(hiveConf).build();
++    miniHS2.start(new HashMap<String, String>());
++
++    // Add the parameter here if it cannot change at runtime
++    addToExpectedRestrictedMap("hive.conf.restricted.list");
++    addToExpectedRestrictedMap("hive.security.authenticator.manager");
++    addToExpectedRestrictedMap("hive.security.authorization.manager");
++    addToExpectedRestrictedMap("hive.users.in.admin.role");
++    addToExpectedRestrictedMap("hadoop.bin.path");
++    addToExpectedRestrictedMap("yarn.bin.path");
++    addToExpectedRestrictedMap("_hive.local.session.path");
++    addToExpectedRestrictedMap("_hive.tmp_table_space");
++    addToExpectedRestrictedMap("_hive.hdfs.session.path");
++  }
++
++  @AfterClass
++  public static void stopServices() throws Exception {
++    if (miniHS2 != null && miniHS2.isStarted()) {
++      miniHS2.stop();
++    }
++    HiveConf.setHivemetastoreSiteUrl(oldHiveMetastoreSiteURL);
++    HiveConf.setHiveSiteLocation(oldHiveSiteURL);
++  }
++
++  @Test
++  public void testRestrictedList() throws Exception {
++    assertTrue("Test setup failed. MiniHS2 is not initialized",
++        miniHS2 != null && miniHS2.isStarted());
++
++    checkRestrictedListMatch();
++
++    try (Connection hs2Conn = DriverManager.getConnection(miniHS2.getJdbcURL(), "hive", "hive");
++         Statement stmt = hs2Conn.createStatement();) {
++      for (Map.Entry<String, String> entry : expectedRestrictedMap.entrySet()) {
++        String parameter = entry.getKey();
++        String value = entry.getValue();
++
++        try {
++          stmt.execute("set " + parameter + "=" + value);
++          fail("Exception not thrown for parameter: " + parameter);
++        } catch (Exception e1) {
++          assertTrue("Unexpected exception: " + e1.getMessage(),
++              e1.getMessage().contains("Error while processing statement: Cannot modify"));
++        }
++      }
++    } catch (Exception e2) {
++      fail("Unexpected Exception: " + e2.getMessage());
++    }
++  }
++
++  // This test will make sure that every entry in hive.conf.restricted.list, has a test here
++  private void checkRestrictedListMatch(){
++    HiveConf.ConfVars restrictedConfVar = HiveConf.getConfVars("hive.conf.restricted.list");
++    String definedRestrictedListString = HiveConf.getVar(hiveConf, restrictedConfVar);
++    Set<String> definedRestrictedSet = new HashSet<String>();
++
++    definedRestrictedSet.clear();
++    assertTrue(definedRestrictedListString != null);
++
++    // populate definedRestrictedSet with parameters defined in hive.conf.restricted.list
++    for (String entry : definedRestrictedListString.split(",")) {
++      definedRestrictedSet.add(entry.trim());
++    }
++
++    // remove all parameters that are tested.  if the parameter is tested it is part of
++    // expectedRestrictedMap
++    definedRestrictedSet.removeAll(expectedRestrictedMap.keySet());
++
++    // the remaining parameters in definedRestrictedSet are starting parameter name
++    for (String definedRestrictedParameter : definedRestrictedSet) {
++      boolean definedRestrictedParameterTested = false;
++      for (String expectedRestrictedParameter : expectedRestrictedMap.keySet()) {
++        if (expectedRestrictedParameter.startsWith(definedRestrictedParameter)) {
++          definedRestrictedParameterTested = true;
++          break;
++        }
++      }
++      assertTrue(definedRestrictedParameter + " not tested.", definedRestrictedParameterTested);
++    }
++  }
++
++  private static void addToExpectedRestrictedMap(String parameter) {
++    HiveConf.ConfVars confVars = HiveConf.getConfVars(parameter);
++    String value = "foo";
++
++    if (confVars != null) {
++      if (confVars.isType("foo") && confVars.validate("foo") == null) {
++        value = "foo";
++      } else if (confVars.isType("1s") && confVars.validate("1s") == null) {
++        value = "1s";
++      } else if (confVars.isType("1") && confVars.validate("1") == null) {
++        value = "1";
++      }
++    }
++    expectedRestrictedMap.put(parameter, value);
++  }
++}
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/session/SessionState.java b/ql/src/java/org/apache/hadoop/hive/ql/session/SessionState.java
+index 657dbf9..69dd287 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/session/SessionState.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/session/SessionState.java
+@@ -643,6 +643,13 @@ private void createSessionDirs(String userName) throws IOException {
+     // Don't register with deleteOnExit
+     createPath(conf, hdfsTmpTableSpace, scratchDirPermission, false, false);
+     conf.set(TMP_TABLE_SPACE_KEY, hdfsTmpTableSpace.toUri().toString());
++
++    // _hive.tmp_table_space, _hive.hdfs.session.path, and _hive.local.session.path are respectively
++    // saved in hdfsTmpTableSpace, hdfsSessionPath and localSessionPath.  Saving them as conf
++    // variables is useful to expose them to end users.  But, end users shouldn't change them.
++    // Adding them to restricted list.
++    conf.addToRestrictList(
++        LOCAL_SESSION_PATH_KEY + "," + HDFS_SESSION_PATH_KEY + "," + TMP_TABLE_SPACE_KEY);
+   }
+ 
+   /**
+diff --git a/ql/src/test/queries/clientnegative/change_hive_hdfs_session_path.q b/ql/src/test/queries/clientnegative/change_hive_hdfs_session_path.q
+new file mode 100644
+index 0000000..d3f3a21
+--- /dev/null
++++ b/ql/src/test/queries/clientnegative/change_hive_hdfs_session_path.q
+@@ -0,0 +1,2 @@
++set _hive.hdfs.session.path;
++set _hive.hdfs.session.path=foo;
+diff --git a/ql/src/test/queries/clientnegative/change_hive_local_session_path.q b/ql/src/test/queries/clientnegative/change_hive_local_session_path.q
+new file mode 100644
+index 0000000..6477862
+--- /dev/null
++++ b/ql/src/test/queries/clientnegative/change_hive_local_session_path.q
+@@ -0,0 +1,2 @@
++set _hive.local.session.path;
++set _hive.local.session.path=foo;
+diff --git a/ql/src/test/queries/clientnegative/change_hive_tmp_table_space.q b/ql/src/test/queries/clientnegative/change_hive_tmp_table_space.q
+new file mode 100644
+index 0000000..6fb82f5
+--- /dev/null
++++ b/ql/src/test/queries/clientnegative/change_hive_tmp_table_space.q
+@@ -0,0 +1,2 @@
++set _hive.tmp_table_space;
++set _hive.tmp_table_space=foo;
+diff --git a/ql/src/test/results/clientnegative/change_hive_hdfs_session_path.q.out b/ql/src/test/results/clientnegative/change_hive_hdfs_session_path.q.out
+new file mode 100644
+index 0000000..dd5cef7
+--- /dev/null
++++ b/ql/src/test/results/clientnegative/change_hive_hdfs_session_path.q.out
+@@ -0,0 +1,2 @@
++#### A masked pattern was here ####
++Query returned non-zero code: 1, cause: Cannot modify _hive.hdfs.session.path at runtime. It is in the listof parameters that can't be modified at runtime
+diff --git a/ql/src/test/results/clientnegative/change_hive_local_session_path.q.out b/ql/src/test/results/clientnegative/change_hive_local_session_path.q.out
+new file mode 100644
+index 0000000..ab3edeb
+--- /dev/null
++++ b/ql/src/test/results/clientnegative/change_hive_local_session_path.q.out
+@@ -0,0 +1,2 @@
++#### A masked pattern was here ####
++Query returned non-zero code: 1, cause: Cannot modify _hive.local.session.path at runtime. It is in the listof parameters that can't be modified at runtime
+diff --git a/ql/src/test/results/clientnegative/change_hive_tmp_table_space.q.out b/ql/src/test/results/clientnegative/change_hive_tmp_table_space.q.out
+new file mode 100644
+index 0000000..689d91b
+--- /dev/null
++++ b/ql/src/test/results/clientnegative/change_hive_tmp_table_space.q.out
+@@ -0,0 +1,2 @@
++#### A masked pattern was here ####
++Query returned non-zero code: 1, cause: Cannot modify _hive.tmp_table_space at runtime. It is in the listof parameters that can't be modified at runtime
+-- 
+1.7.9.5
+

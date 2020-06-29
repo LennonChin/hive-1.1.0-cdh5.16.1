@@ -1,0 +1,429 @@
+From 297c4060529fc34fd17d5521da9ab4882e25aa2b Mon Sep 17 00:00:00 2001
+From: Misha Dmitriev <misha@cloudera.com>
+Date: Thu, 14 Jun 2018 16:14:12 -0700
+Subject: [PATCH 1404/1431] CDH-67963: HIVE-19668: Hive Server 2 service
+ hanging ==C5_APPROVED_BUGFIX==
+
+Change-Id: I7d0cda85275d9c8812933f01d8813992592086fb
+(cherry picked from commit 7cd5678f1c803d4ec5b47c7131d5194a4d4f02b9)
+---
+ .../org/apache/hadoop/hive/ql/exec/Utilities.java  |    3 +-
+ .../org/apache/hadoop/hive/ql/parse/ASTNode.java   |   31 +++++-
+ .../apache/hadoop/hive/ql/parse/ASTNodeOrigin.java |    4 +-
+ .../hadoop/hive/ql/parse/ImmutableCommonToken.java |  103 ++++++++++++++++++++
+ .../apache/hadoop/hive/ql/parse/ParseDriver.java   |   10 +-
+ .../org/apache/hadoop/hive/ql/parse/QBExpr.java    |    5 +-
+ .../apache/hadoop/hive/ql/parse/QBParseInfo.java   |    5 +-
+ .../hadoop/hive/ql/parse/SemanticAnalyzer.java     |   26 +++--
+ .../apache/hadoop/hive/ql/parse/SubQueryUtils.java |   11 ++-
+ 9 files changed, 173 insertions(+), 25 deletions(-)
+ create mode 100644 ql/src/java/org/apache/hadoop/hive/ql/parse/ImmutableCommonToken.java
+
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/Utilities.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/Utilities.java
+index 1daa3f3..7fb6917 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/Utilities.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/Utilities.java
+@@ -912,7 +912,8 @@ public void write(Kryo kryo, Output output, java.sql.Date sqlDate) {
+   private static class CommonTokenSerializer extends com.esotericsoftware.kryo.Serializer<CommonToken> {
+     @Override
+     public CommonToken read(Kryo kryo, Input input, Class<CommonToken> clazz) {
+-      return new CommonToken(input.readInt(), input.readString());
++      return new CommonToken(
++          input.readInt(), StringInternUtils.internIfNotNull(input.readString()));
+     }
+ 
+     @Override
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/parse/ASTNode.java b/ql/src/java/org/apache/hadoop/hive/ql/parse/ASTNode.java
+index 8400ee8..e14ee9f 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/parse/ASTNode.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/parse/ASTNode.java
+@@ -22,9 +22,12 @@
+ import java.util.ArrayList;
+ import java.util.List;
+ 
++import com.google.common.collect.Interner;
++import com.google.common.collect.Interners;
+ import org.antlr.runtime.Token;
+ import org.antlr.runtime.tree.CommonTree;
+ import org.antlr.runtime.tree.Tree;
++import org.apache.hadoop.hive.common.StringInternUtils;
+ import org.apache.hadoop.hive.ql.lib.Node;
+ 
+ /**
+@@ -39,17 +42,16 @@
+   private transient ASTNode rootNode;
+   private transient boolean isValidASTStr;
+ 
++  private static final Interner<Token> TOKEN_CACHE = Interners.newWeakInterner();
++
+   public ASTNode() {
+   }
+ 
+   /**
+-   * Constructor.
+-   *
+-   * @param t
+-   *          Token for the CommonTree Node
++   * @param t  Token for the CommonTree Node
+    */
+   public ASTNode(Token t) {
+-    super(t);
++    super(internToken(t));
+   }
+ 
+   public ASTNode(ASTNode node) {
+@@ -224,6 +226,13 @@ public void replaceChildren(int startChildIndex, int stopChildIndex, Object t) {
+   }
+ 
+   @Override
++  protected List createChildrenList() {
++    // Measurements show that in most situations the number of children is small.
++    // Avoid wasting memory by creating ArrayList with the default capacity of 10.
++    return new ArrayList(2);
++  }
++
++  @Override
+   public String toStringTree() {
+ 
+     // The root might have changed because of tree modifications.
+@@ -268,4 +277,16 @@ private String toStringTree(ASTNode rootNode) {
+     endIndx =  rootNode.getMemoizedStringLen();
+     return rootNode.getMemoizedSubString(startIndx, endIndx);
+   }
++
++  private static Token internToken(Token t) {
++    if (t == null) {
++      return null;
++    }
++    if (t instanceof ImmutableCommonToken) {
++      return TOKEN_CACHE.intern(t);
++    } else {
++      t.setText(StringInternUtils.internIfNotNull(t.getText()));
++      return t;
++    }
++  }
+ }
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/parse/ASTNodeOrigin.java b/ql/src/java/org/apache/hadoop/hive/ql/parse/ASTNodeOrigin.java
+index fba853f..80af3af 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/parse/ASTNodeOrigin.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/parse/ASTNodeOrigin.java
+@@ -18,6 +18,8 @@
+ 
+ package org.apache.hadoop.hive.ql.parse;
+ 
++import org.apache.hadoop.hive.common.StringInternUtils;
++
+ /**
+  * ASTNodeOrigin contains contextual information about the object from whose
+  * definition a particular ASTNode originated. For example, suppose a view v is
+@@ -46,7 +48,7 @@ public ASTNodeOrigin(String objectType, String objectName,
+       String objectDefinition, String usageAlias, ASTNode usageNode) {
+     this.objectType = objectType;
+     this.objectName = objectName;
+-    this.objectDefinition = objectDefinition;
++    this.objectDefinition = StringInternUtils.internIfNotNull(objectDefinition);
+     this.usageAlias = usageAlias;
+     this.usageNode = usageNode;
+   }
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/parse/ImmutableCommonToken.java b/ql/src/java/org/apache/hadoop/hive/ql/parse/ImmutableCommonToken.java
+new file mode 100644
+index 0000000..ae2bda3
+--- /dev/null
++++ b/ql/src/java/org/apache/hadoop/hive/ql/parse/ImmutableCommonToken.java
+@@ -0,0 +1,103 @@
++/**
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.hadoop.hive.ql.parse;
++
++import org.antlr.runtime.CharStream;
++import org.antlr.runtime.CommonToken;
++import org.antlr.runtime.Token;
++
++/**
++ * This class is designed to hold "constant" CommonTokens, that have fixed type
++ * and text, and everything else equal to zero. They can therefore be reused
++ * to save memory. However, to support reuse (canonicalization) we need to
++ * implement the proper hashCode() and equals() methods.
++ */
++class ImmutableCommonToken extends CommonToken {
++
++  private static final String SETTERS_DISABLED = "All setter methods are intentionally disabled";
++
++  private final int hashCode;
++
++  ImmutableCommonToken(int type, String text) {
++    super(type, text);
++    hashCode = calculateHash();
++  }
++
++  private int calculateHash() {
++    return type * 31 + (text != null ? text.hashCode() : 0);
++  }
++
++  @Override
++  public boolean equals(Object other) {
++    if (!(other instanceof ImmutableCommonToken)) return false;
++    ImmutableCommonToken otherToken = (ImmutableCommonToken) other;
++    return type == otherToken.type &&
++        ((text == null && otherToken.text == null) ||
++            text != null && text.equals(otherToken.text));
++  }
++
++  @Override
++  public int hashCode() { return hashCode; }
++
++  // All the setter methods are overridden to throw exception, to prevent accidental
++  // attempts to modify data fields that should be immutable.
++
++  @Override
++  public void setLine(int line) { throw new UnsupportedOperationException(SETTERS_DISABLED); }
++
++  @Override
++  public void setText(String text) {
++    throw new UnsupportedOperationException(SETTERS_DISABLED);
++  }
++
++  @Override
++  public void setCharPositionInLine(int charPositionInLine) {
++    throw new UnsupportedOperationException(SETTERS_DISABLED);
++  }
++
++  @Override
++  public void setChannel(int channel) {
++    throw new UnsupportedOperationException(SETTERS_DISABLED);
++  }
++
++  @Override
++  public void setType(int type) {
++    throw new UnsupportedOperationException(SETTERS_DISABLED);
++  }
++
++  @Override
++  public void setStartIndex(int start) {
++    throw new UnsupportedOperationException(SETTERS_DISABLED);
++  }
++
++  @Override
++  public void setStopIndex(int stop) {
++    throw new UnsupportedOperationException(SETTERS_DISABLED);
++  }
++
++  @Override
++  public void setTokenIndex(int index) {
++    throw new UnsupportedOperationException(SETTERS_DISABLED);
++  }
++
++  @Override
++  public void setInputStream(CharStream input) {
++    throw new UnsupportedOperationException(SETTERS_DISABLED);
++  }
++}
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/parse/ParseDriver.java b/ql/src/java/org/apache/hadoop/hive/ql/parse/ParseDriver.java
+index 1f74d08..3466031 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/parse/ParseDriver.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/parse/ParseDriver.java
+@@ -146,15 +146,19 @@ public Object create(Token payload) {
+     }
+ 
+     @Override
+-    public Object dupNode(Object t) {
++    public Token createToken(int tokenType, String text) {
++      return new ImmutableCommonToken(tokenType, text);
++    }
+ 
++    @Override
++    public Object dupNode(Object t) {
+       return create(((CommonTree)t).token);
+-    };
++    }
+ 
+     @Override
+     public Object errorNode(TokenStream input, Token start, Token stop, RecognitionException e) {
+       return new ASTErrorNode(input, start, stop, e);
+-    };
++    }
+   };
+ 
+   public ASTNode parse(String command) throws ParseException {
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/parse/QBExpr.java b/ql/src/java/org/apache/hadoop/hive/ql/parse/QBExpr.java
+index 36e65da..88b4730 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/parse/QBExpr.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/parse/QBExpr.java
+@@ -20,6 +20,7 @@
+ 
+ import org.apache.commons.logging.Log;
+ import org.apache.commons.logging.LogFactory;
++import org.apache.hadoop.hive.common.StringInternUtils;
+ 
+ /**
+  * Implementation of the query block expression.
+@@ -49,11 +50,11 @@ public String getAlias() {
+   }
+ 
+   public void setAlias(String alias) {
+-    this.alias = alias;
++    this.alias = StringInternUtils.internIfNotNull(alias);
+   }
+ 
+   public QBExpr(String alias) {
+-    this.alias = alias;
++    setAlias(alias);
+   }
+ 
+   public QBExpr(QB qb) {
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/parse/QBParseInfo.java b/ql/src/java/org/apache/hadoop/hive/ql/parse/QBParseInfo.java
+index c3b256c..8951ec3 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/parse/QBParseInfo.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/parse/QBParseInfo.java
+@@ -30,6 +30,7 @@
+ import org.antlr.runtime.tree.Tree;
+ import org.apache.commons.logging.Log;
+ import org.apache.commons.logging.LogFactory;
++import org.apache.hadoop.hive.common.StringInternUtils;
+ import org.apache.hadoop.hive.ql.parse.BaseSemanticAnalyzer.tableSpec;
+ 
+ /**
+@@ -140,7 +141,7 @@ public QBParseInfo(String alias, boolean isSubQ) {
+     destToWindowingExprs = new LinkedHashMap<String, LinkedHashMap<String, ASTNode>>();
+     destToDistinctFuncExprs = new HashMap<String, List<ASTNode>>();
+ 
+-    this.alias = alias;
++    this.alias = StringInternUtils.internIfNotNull(alias);
+     this.isSubQ = isSubQ;
+     outerQueryLimit = -1;
+ 
+@@ -439,7 +440,7 @@ public boolean hasExprToColumnAlias(ASTNode expr) {
+   }
+ 
+   public void setExprToColumnAlias(ASTNode expr, String alias) {
+-    exprToColumnAlias.put(expr,  alias);
++    exprToColumnAlias.put(expr, StringInternUtils.internIfNotNull(alias));
+   }
+ 
+   public void setDestLimit(String dest, Integer limit) {
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/parse/SemanticAnalyzer.java b/ql/src/java/org/apache/hadoop/hive/ql/parse/SemanticAnalyzer.java
+index b9b5223..b052913 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/parse/SemanticAnalyzer.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/parse/SemanticAnalyzer.java
+@@ -25,8 +25,6 @@
+ import java.security.AccessControlException;
+ import java.util.ArrayList;
+ import java.util.Arrays;
+-import java.util.Collections;
+-import java.util.Comparator;
+ import java.util.HashMap;
+ import java.util.HashSet;
+ import java.util.Iterator;
+@@ -54,8 +52,8 @@
+ import org.apache.hadoop.fs.permission.FsAction;
+ import org.apache.hadoop.hive.common.FileUtils;
+ import org.apache.hadoop.hive.common.ObjectPair;
+-import org.apache.hadoop.hive.common.StatsSetupConst;
+ import org.apache.hadoop.hive.common.StatsSetupConst.StatDB;
++import org.apache.hadoop.hive.common.StringInternUtils;
+ import org.apache.hadoop.hive.conf.HiveConf;
+ import org.apache.hadoop.hive.conf.HiveConf.ConfVars;
+ import org.apache.hadoop.hive.metastore.MetaStoreUtils;
+@@ -210,7 +208,6 @@
+ import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
+ import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
+ import org.apache.hadoop.hive.shims.HadoopShims;
+-import org.apache.hadoop.hive.shims.ShimLoader;
+ import org.apache.hadoop.hive.shims.Utils;
+ import org.apache.hadoop.io.IOUtils;
+ import org.apache.hadoop.io.Text;
+@@ -304,6 +301,15 @@
+   /** Not thread-safe. */
+   final ASTSearcher astSearcher = new ASTSearcher();
+ 
++  private static final CommonToken SELECTDI_TOKEN =
++      new ImmutableCommonToken(HiveParser.TOK_SELECTDI, "TOK_SELECTDI");
++  private static final CommonToken SELEXPR_TOKEN =
++      new ImmutableCommonToken(HiveParser.TOK_SELEXPR, "TOK_SELEXPR");
++  private static final CommonToken TABLEORCOL_TOKEN =
++      new ImmutableCommonToken(HiveParser.TOK_TABLE_OR_COL, "TOK_TABLE_OR_COL");
++  private static final CommonToken DOT_TOKEN =
++      new ImmutableCommonToken(HiveParser.DOT, ".");
++
+   static class Phase1Ctx {
+     String dest;
+     int nextNum;
+@@ -12430,9 +12436,10 @@ protected boolean updating() {
+   protected boolean deleting() {
+     return false;
+   }
++
+   public static ASTNode genSelectDIAST(RowResolver rr) {
+     HashMap<String, LinkedHashMap<String, ColumnInfo>> map = rr.getRslvMap();
+-    ASTNode selectDI = new ASTNode(new CommonToken(HiveParser.TOK_SELECTDI, "TOK_SELECTDI"));
++    ASTNode selectDI = new ASTNode(SELECTDI_TOKEN);
+     for (String tabAlias : map.keySet()) {
+       for (Entry<String, ColumnInfo> entry : map.get(tabAlias).entrySet()) {
+         selectDI.addChild(buildSelExprSubTree(tabAlias, entry.getKey()));
+@@ -12441,10 +12448,11 @@ public static ASTNode genSelectDIAST(RowResolver rr) {
+     return selectDI;
+   }
+   private static ASTNode buildSelExprSubTree(String tableAlias, String col) {
+-    ASTNode selexpr = new ASTNode(new CommonToken(HiveParser.TOK_SELEXPR, "TOK_SELEXPR"));
+-    ASTNode tableOrCol = new ASTNode(new CommonToken(HiveParser.TOK_TABLE_OR_COL,
+-        "TOK_TABLE_OR_COL"));
+-    ASTNode dot = new ASTNode(new CommonToken(HiveParser.DOT, "."));
++    tableAlias = StringInternUtils.internIfNotNull(tableAlias);
++    col = StringInternUtils.internIfNotNull(col);
++    ASTNode selexpr = new ASTNode(SELEXPR_TOKEN);
++    ASTNode tableOrCol = new ASTNode(TABLEORCOL_TOKEN);
++    ASTNode dot = new ASTNode(DOT_TOKEN);
+     tableOrCol.addChild(new ASTNode(new CommonToken(HiveParser.Identifier, tableAlias)));
+     dot.addChild(tableOrCol);
+     dot.addChild(new ASTNode(new CommonToken(HiveParser.Identifier, col)));
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/parse/SubQueryUtils.java b/ql/src/java/org/apache/hadoop/hive/ql/parse/SubQueryUtils.java
+index 57868b7..c607169 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/parse/SubQueryUtils.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/parse/SubQueryUtils.java
+@@ -22,6 +22,7 @@
+ import java.util.List;
+ import java.util.Map;
+ 
++import org.antlr.runtime.CommonToken;
+ import org.antlr.runtime.tree.CommonTreeAdaptor;
+ import org.apache.hadoop.hive.ql.Context;
+ import org.apache.hadoop.hive.ql.ErrorMsg;
+@@ -127,11 +128,17 @@ boolean removeSubQuery(ASTNode node) {
+         ASTNode child = (ASTNode) node.getChild(0);
+         if (child == subQuery) {
+           ASTNode sqOpType = (ASTNode) subQuery.getChild(0).getChild(0);
++          ASTNode newSqOpType;
++          // We create a new ASTNode below because its current token is likely an
++          // ImmutableCommonToken, whose type cannot be modified.
+           if (sqOpType.getType() == HiveParser.KW_EXISTS) {
+-            sqOpType.getToken().setType(HiveParser.TOK_SUBQUERY_OP_NOTEXISTS);
++            newSqOpType = new ASTNode(new CommonToken(
++                HiveParser.TOK_SUBQUERY_OP_NOTEXISTS, "TOK_SUBQUERY_OP_NOTEXISTS"));
+           } else {
+-            sqOpType.getToken().setType(HiveParser.TOK_SUBQUERY_OP_NOTIN);
++            newSqOpType = new ASTNode(new CommonToken(
++                HiveParser.TOK_SUBQUERY_OP_NOTIN, "TOK_SUBQUERY_OP_NOTIN"));
+           }
++          subQuery.getChild(0).setChild(0, newSqOpType);
+           ASTNode parent = getParentInWhereClause(node);
+           if (parent == null) {
+             root = subQuery;
+-- 
+1.7.9.5
+

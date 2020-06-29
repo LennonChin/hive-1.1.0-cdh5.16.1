@@ -1,0 +1,279 @@
+From a23693e24fadb9184c34709b742059c9c0538f8d Mon Sep 17 00:00:00 2001
+From: Sergio Pena <sergio.pena@cloudera.com>
+Date: Wed, 9 May 2018 22:37:09 -0700
+Subject: [PATCH 1396/1431] HIVE-19374: Parse and process ALTER TABLE SET
+ OWNER command syntax (Sergio Pena, reviewed by
+ Vihang Karajgaonkar)
+
+==C5_FEATURE_FGP==
+
+Change-Id: I7ff3ed5a9a8d891d6c4ac90e05bbaa7bcc3bc904
+---
+ .../org/apache/hadoop/hive/ql/exec/DDLTask.java    |    5 +++++
+ .../org/apache/hadoop/hive/ql/metadata/Table.java  |   15 +++++++++++++
+ .../metadata/formatting/JsonMetaDataFormatter.java |    1 +
+ .../metadata/formatting/MetaDataFormatUtils.java   |    1 +
+ .../hadoop/hive/ql/parse/DDLSemanticAnalyzer.java  |   17 +++++++++++++++
+ .../org/apache/hadoop/hive/ql/parse/HiveParser.g   |    8 +++++++
+ .../hive/ql/parse/SemanticAnalyzerFactory.java     |    2 ++
+ .../apache/hadoop/hive/ql/plan/AlterTableDesc.java |   22 +++++++++++++++++++-
+ .../apache/hadoop/hive/ql/plan/HiveOperation.java  |    1 +
+ .../authorization/plugin/HiveOperationType.java    |    1 +
+ .../plugin/sqlstd/Operation2Privilege.java         |    2 ++
+ 11 files changed, 74 insertions(+), 1 deletion(-)
+
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/DDLTask.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/DDLTask.java
+index 38349c8..6fb09bd 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/DDLTask.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/DDLTask.java
+@@ -3690,6 +3690,11 @@ private int alterTableOrSinglePartition(AlterTableDesc alterTbl, Table tbl, Part
+       }
+ 
+       tbl.setStoredAsSubDirectories(alterTbl.isStoredAsSubDirectories());
++    } else if (alterTbl.getOp() == AlterTableDesc.AlterTableTypes.OWNER) {
++      if (alterTbl.getOwnerPrincipal() != null) {
++        tbl.setOwner(alterTbl.getOwnerPrincipal().getName());
++        tbl.setOwnerType(alterTbl.getOwnerPrincipal().getType());
++      }
+     } else if (alterTbl.getOp() == AlterTableDesc.AlterTableTypes.ALTERSKEWEDLOCATION) {
+       // process location one-by-one
+       Map<List<String>,String> locMaps = alterTbl.getSkewedLocations();
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/metadata/Table.java b/ql/src/java/org/apache/hadoop/hive/ql/metadata/Table.java
+index 388bd5e..64ee639 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/metadata/Table.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/metadata/Table.java
+@@ -43,6 +43,7 @@
+ import org.apache.hadoop.hive.metastore.api.FieldSchema;
+ import org.apache.hadoop.hive.metastore.api.MetaException;
+ import org.apache.hadoop.hive.metastore.api.Order;
++import org.apache.hadoop.hive.metastore.api.PrincipalType;
+ import org.apache.hadoop.hive.metastore.api.SerDeInfo;
+ import org.apache.hadoop.hive.metastore.api.SkewedInfo;
+ import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
+@@ -727,6 +728,12 @@ public String getOwner() {
+   }
+ 
+   /**
++   * @return The owner type of the table.
++   * @see org.apache.hadoop.hive.metastore.api.Table#getOwnerType()
++   */
++  public PrincipalType getOwnerType() { return tTable.getOwnerType(); }
++
++  /**
+    * @return The table parameters.
+    * @see org.apache.hadoop.hive.metastore.api.Table#getParameters()
+    */
+@@ -751,6 +758,14 @@ public void setOwner(String owner) {
+   }
+ 
+   /**
++   * @param ownerType
++   * @see org.apache.hadoop.hive.metastore.api.Table#setOwnerType(org.apache.hadoop.hive.metastore.api.PrincipalType)
++   */
++  public void setOwnerType(PrincipalType ownerType) {
++    tTable.setOwnerType(ownerType);
++  }
++
++  /**
+    * @param retention
+    * @see org.apache.hadoop.hive.metastore.api.Table#setRetention(int)
+    */
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/metadata/formatting/JsonMetaDataFormatter.java b/ql/src/java/org/apache/hadoop/hive/ql/metadata/formatting/JsonMetaDataFormatter.java
+index cf8dd46..c8a8bb3 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/metadata/formatting/JsonMetaDataFormatter.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/metadata/formatting/JsonMetaDataFormatter.java
+@@ -181,6 +181,7 @@ public void showTableStatus(DataOutputStream out, Hive db, HiveConf conf,
+     MapBuilder builder = MapBuilder.create();
+ 
+     builder.put("tableName", tbl.getTableName());
++    builder.put("ownerType", (tbl.getOwnerType() != null) ? tbl.getOwnerType().name() : "null");
+     builder.put("owner", tbl.getOwner());
+     builder.put("location", tblLoc);
+     builder.put("inputFormat", inputFormattCls);
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/metadata/formatting/MetaDataFormatUtils.java b/ql/src/java/org/apache/hadoop/hive/ql/metadata/formatting/MetaDataFormatUtils.java
+index fa49566..a961271 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/metadata/formatting/MetaDataFormatUtils.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/metadata/formatting/MetaDataFormatUtils.java
+@@ -343,6 +343,7 @@ private static void getStorageDescriptorInfo(StringBuilder tableInfo,
+ 
+   private static void getTableMetaDataInformation(StringBuilder tableInfo, Table  tbl) {
+     formatOutput("Database:", tbl.getDbName(), tableInfo);
++    formatOutput("OwnerType:", (tbl.getOwnerType() != null) ? tbl.getOwnerType().name() : "null", tableInfo);
+     formatOutput("Owner:", tbl.getOwner(), tableInfo);
+     formatOutput("CreateTime:", formatDate(tbl.getTTable().getCreateTime()), tableInfo);
+     formatOutput("LastAccessTime:", formatDate(tbl.getTTable().getLastAccessTime()), tableInfo);
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/parse/DDLSemanticAnalyzer.java b/ql/src/java/org/apache/hadoop/hive/ql/parse/DDLSemanticAnalyzer.java
+index 1650be0..e66d96d 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/parse/DDLSemanticAnalyzer.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/parse/DDLSemanticAnalyzer.java
+@@ -297,6 +297,8 @@ public void analyzeInternal(ASTNode input) throws SemanticException {
+         analyzeAlterTableCompact(ast, tableName, partSpec);
+       } else if(ast.getToken().getType() == HiveParser.TOK_ALTERTABLE_UPDATECOLSTATS){
+         analyzeAlterTableUpdateStats(ast, tableName, partSpec);
++      } else if (ast.getToken().getType() == HiveParser.TOK_ALTERTABLE_OWNER) {
++        analyzeAlterTableOwner(ast, tableName);
+       }
+       break;
+     }
+@@ -1462,6 +1464,21 @@ private void addInputsOutputsAlterTable(String tableName, Map<String, String> pa
+     }
+   }
+ 
++  private void analyzeAlterTableOwner(ASTNode ast, String tableName) throws SemanticException {
++    PrincipalDesc ownerPrincipal = AuthorizationParseUtils.getPrincipalDesc((ASTNode) ast.getChild(0));
++
++    if (ownerPrincipal.getType() == null) {
++      throw new SemanticException("Owner type can't be null in alter table set owner command");
++    }
++
++    if (ownerPrincipal.getName() == null) {
++      throw new SemanticException("Owner name can't be null in alter table set owner command");
++    }
++
++    AlterTableDesc alterTblDesc  = new AlterTableDesc(tableName, ownerPrincipal);
++    rootTasks.add(TaskFactory.get(new DDLWork(getInputs(), getOutputs(), alterTblDesc), conf));
++  }
++
+   private void analyzeAlterTableLocation(ASTNode ast, String tableName,
+       HashMap<String, String> partSpec) throws SemanticException {
+ 
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/parse/HiveParser.g b/ql/src/java/org/apache/hadoop/hive/ql/parse/HiveParser.g
+index 63407ae..57c13bd 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/parse/HiveParser.g
++++ b/ql/src/java/org/apache/hadoop/hive/ql/parse/HiveParser.g
+@@ -162,6 +162,7 @@ TOK_ALTERTABLE_CLUSTER_SORT;
+ TOK_ALTERTABLE_COMPACT;
+ TOK_ALTERINDEX_REBUILD;
+ TOK_ALTERINDEX_PROPERTIES;
++TOK_ALTERTABLE_OWNER;
+ TOK_MSCK;
+ TOK_SHOWDATABASES;
+ TOK_SHOWTABLES;
+@@ -980,6 +981,7 @@ alterTableStatementSuffix
+     | alterStatementSuffixExchangePartition
+     | alterStatementPartitionKeyType
+     | partitionSpec? alterTblPartitionStatementSuffix -> alterTblPartitionStatementSuffix partitionSpec?
++    | alterStatementSuffixSetOwner
+     ;
+ 
+ alterTblPartitionStatementSuffix
+@@ -1306,6 +1308,12 @@ alterStatementSuffixCompact
+     -> ^(TOK_ALTERTABLE_COMPACT $compactType)
+     ;
+ 
++alterStatementSuffixSetOwner
++@init { pushMsg("alter table set owner", state); }
++@after { popMsg(state); }
++    : KW_SET KW_OWNER principalName
++    -> ^(TOK_ALTERTABLE_OWNER principalName)
++    ;
+ 
+ fileFormat
+ @init { pushMsg("file format specification", state); }
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/parse/SemanticAnalyzerFactory.java b/ql/src/java/org/apache/hadoop/hive/ql/parse/SemanticAnalyzerFactory.java
+index 0e635f5..5d49d75 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/parse/SemanticAnalyzerFactory.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/parse/SemanticAnalyzerFactory.java
+@@ -87,6 +87,7 @@
+     commandType.put(HiveParser.TOK_ALTERVIEW_DROPPROPERTIES, HiveOperation.ALTERVIEW_PROPERTIES);
+     commandType.put(HiveParser.TOK_ALTERVIEW_ADDPARTS, HiveOperation.ALTERTABLE_ADDPARTS);
+     commandType.put(HiveParser.TOK_ALTERVIEW_DROPPARTS, HiveOperation.ALTERTABLE_DROPPARTS);
++    commandType.put(HiveParser.TOK_ALTERTABLE_OWNER, HiveOperation.ALTERTABLE_OWNER);
+     commandType.put(HiveParser.TOK_ALTERVIEW_RENAME, HiveOperation.ALTERVIEW_RENAME);
+     commandType.put(HiveParser.TOK_ALTERVIEW, HiveOperation.ALTERVIEW_AS);
+     commandType.put(HiveParser.TOK_QUERY, HiveOperation.QUERY);
+@@ -189,6 +190,7 @@ public static BaseSemanticAnalyzer get(HiveConf conf, ASTNode tree)
+           case HiveParser.TOK_ALTERTABLE_DROPPROPERTIES:
+           case HiveParser.TOK_ALTERTABLE_EXCHANGEPARTITION:
+           case HiveParser.TOK_ALTERTABLE_SKEWED:
++          case HiveParser.TOK_ALTERTABLE_OWNER:
+           setSessionCommandType(commandType.get(child.getType()));
+           return new DDLSemanticAnalyzer(conf);
+         }
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/plan/AlterTableDesc.java b/ql/src/java/org/apache/hadoop/hive/ql/plan/AlterTableDesc.java
+index 24cf1da..3273d88 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/plan/AlterTableDesc.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/plan/AlterTableDesc.java
+@@ -55,7 +55,8 @@
+     DROPPARTITION("drop partition"), RENAMEPARTITION("rename partition"), ADDSKEWEDBY("add skew column"),
+     ALTERSKEWEDLOCATION("alter skew location"), ALTERBUCKETNUM("alter bucket number"),
+     ALTERPARTITION("alter partition"), COMPACT("compact"),
+-    TRUNCATE("truncate"), MERGEFILES("merge files");
++    TRUNCATE("truncate"), MERGEFILES("merge files"),
++    OWNER("set owner");
+     ;
+ 
+     private final String name;
+@@ -115,6 +116,7 @@
+   boolean isDropIfExists = false;
+   boolean isTurnOffSorting = false;
+   boolean isCascade = false;
++  PrincipalDesc ownerPrincipal;
+ 
+   public AlterTableDesc() {
+   }
+@@ -261,6 +263,24 @@ public AlterTableDesc(String tableName, HashMap<String, String> partSpec, int nu
+     this.numberBuckets = numBuckets;
+   }
+ 
++  public AlterTableDesc(String tableName, PrincipalDesc ownerPrincipal) {
++    op  = AlterTableTypes.OWNER;
++    this.oldName = tableName;
++    this.ownerPrincipal = ownerPrincipal;
++  }
++
++  /**
++   * @param ownerPrincipal the owner principal of the table
++   */
++  public void setOwnerPrincipal(PrincipalDesc ownerPrincipal) {
++    this.ownerPrincipal = ownerPrincipal;
++  }
++
++  @Explain(displayName="owner")
++  public PrincipalDesc getOwnerPrincipal() {
++    return this.ownerPrincipal;
++  }
++
+   @Explain(displayName = "new columns")
+   public List<String> getNewColsString() {
+     return Utilities.getFieldSchemaString(getNewCols());
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/plan/HiveOperation.java b/ql/src/java/org/apache/hadoop/hive/ql/plan/HiveOperation.java
+index 0ba26d3..96e9d27 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/plan/HiveOperation.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/plan/HiveOperation.java
+@@ -48,6 +48,7 @@
+   ALTERTABLE_ARCHIVE("ALTERTABLE_ARCHIVE", new Privilege[]{Privilege.ALTER_DATA}, null),
+   ALTERTABLE_UNARCHIVE("ALTERTABLE_UNARCHIVE", new Privilege[]{Privilege.ALTER_DATA}, null),
+   ALTERTABLE_PROPERTIES("ALTERTABLE_PROPERTIES", new Privilege[]{Privilege.ALTER_METADATA}, null),
++  ALTERTABLE_OWNER("ALTERTABLE_OWNER", null, null),
+   ALTERTABLE_SERIALIZER("ALTERTABLE_SERIALIZER", new Privilege[]{Privilege.ALTER_METADATA}, null),
+   ALTERPARTITION_SERIALIZER("ALTERPARTITION_SERIALIZER", new Privilege[]{Privilege.ALTER_METADATA}, null),
+   ALTERTABLE_SERDEPROPERTIES("ALTERTABLE_SERDEPROPERTIES", new Privilege[]{Privilege.ALTER_METADATA}, null),
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/plugin/HiveOperationType.java b/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/plugin/HiveOperationType.java
+index 3a2b709..95b7df2 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/plugin/HiveOperationType.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/plugin/HiveOperationType.java
+@@ -50,6 +50,7 @@
+   ALTERTABLE_ARCHIVE,
+   ALTERTABLE_UNARCHIVE,
+   ALTERTABLE_PROPERTIES,
++  ALTERTABLE_OWNER,
+   ALTERTABLE_SERIALIZER,
+   ALTERTABLE_PARTCOLTYPE,
+   ALTERPARTITION_SERIALIZER,
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/plugin/sqlstd/Operation2Privilege.java b/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/plugin/sqlstd/Operation2Privilege.java
+index a6cfd07..85c53c1 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/plugin/sqlstd/Operation2Privilege.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/security/authorization/plugin/sqlstd/Operation2Privilege.java
+@@ -189,6 +189,8 @@ public HivePrivilegeObjectType getObjectType() {
+ (OWNER_PRIV_AR, OWNER_PRIV_AR));
+     op2Priv.put(HiveOperationType.ALTERTABLE_PROPERTIES, PrivRequirement.newIOPrivRequirement
+ (OWNER_PRIV_AR, OWNER_PRIV_AR));
++    op2Priv.put(HiveOperationType.ALTERTABLE_OWNER, PrivRequirement.newIOPrivRequirement
++(OWNER_PRIV_AR, OWNER_PRIV_AR));
+     op2Priv.put(HiveOperationType.ALTERTABLE_SERIALIZER, PrivRequirement.newIOPrivRequirement
+ (OWNER_PRIV_AR, OWNER_PRIV_AR));
+     op2Priv.put(HiveOperationType.ALTERTABLE_PARTCOLTYPE, PrivRequirement.newIOPrivRequirement
+-- 
+1.7.9.5
+

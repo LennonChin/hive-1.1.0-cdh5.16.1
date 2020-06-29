@@ -1,0 +1,258 @@
+From 54ad6908b3e6ce2284e1027b82bd67f39c4023a5 Mon Sep 17 00:00:00 2001
+From: Sahil Takiar <takiar.sahil@gmail.com>
+Date: Tue, 24 Oct 2017 08:27:24 -0700
+Subject: [PATCH 1364/1431] CDH-58658: HIVE-16601: Display Session Id and
+ Query Name / Id in Spark UI (Sahil Takiar,
+ reviewed by Barna Zsombor Klara, Peter Vary,
+ Xuefu Zhang)
+
+(cherry picked from commit a284df1f87eccee8bdad04afea2150e6c07337a0)
+(cherry picked from commit 43e7cfd998e8e43777a94569fed73a53b94947a8)
+
+Conflicts:
+	common/src/java/org/apache/hadoop/hive/conf/HiveConf.java
+	ql/src/java/org/apache/hadoop/hive/ql/Driver.java
+	ql/src/java/org/apache/hadoop/hive/ql/plan/SparkWork.java
+	ql/src/test/queries/clientpositive/parallel.q
+
+Change-Id: I78a8b9b6638fa10999ee5d159bfd65f989c96d99
+---
+ .../java/org/apache/hadoop/hive/conf/HiveConf.java |    4 ++
+ ql/src/java/org/apache/hadoop/hive/ql/Driver.java  |    6 ++-
+ .../org/apache/hadoop/hive/ql/exec/DagUtils.java   |   39 ++++++++++++++++++++
+ .../hive/ql/exec/spark/HiveSparkClientFactory.java |   16 ++++++--
+ .../hive/ql/exec/spark/RemoteHiveSparkClient.java  |    3 ++
+ .../ql/exec/spark/session/SparkSessionImpl.java    |    2 +-
+ .../spark/session/SparkSessionManagerImpl.java     |    2 +-
+ .../org/apache/hadoop/hive/ql/plan/SparkWork.java  |   16 +++++---
+ ql/src/test/queries/clientpositive/parallel.q      |    2 +-
+ 9 files changed, 76 insertions(+), 14 deletions(-)
+ create mode 100644 ql/src/java/org/apache/hadoop/hive/ql/exec/DagUtils.java
+
+diff --git a/common/src/java/org/apache/hadoop/hive/conf/HiveConf.java b/common/src/java/org/apache/hadoop/hive/conf/HiveConf.java
+index 130fd35..5309d22 100644
+--- a/common/src/java/org/apache/hadoop/hive/conf/HiveConf.java
++++ b/common/src/java/org/apache/hadoop/hive/conf/HiveConf.java
+@@ -1087,6 +1087,10 @@ public void setSparkConfigUpdated(boolean isSparkConfigUpdated) {
+     HIVETEZLOGLEVEL("hive.tez.log.level", "INFO",
+         "The log level to use for tasks executing as part of the DAG.\n" +
+         "Used only if hive.tez.java.opts is used to configure Java options."),
++    HIVEQUERYNAME ("hive.query.name", null,
++        "This named is used by Tez to set the dag name. This name in turn will appear on \n" +
++        "the Tez UI representing the work that was done. Used by Spark to set the query name, will show up in the\n" +
++        "Spark UI."),
+ 
+     HIVEENFORCEBUCKETING("hive.enforce.bucketing", false,
+         "Whether bucketing is enforced. If true, while inserting into the table, bucketing is enforced."),
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/Driver.java b/ql/src/java/org/apache/hadoop/hive/ql/Driver.java
+index 6471b90..1d4bdb2 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/Driver.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/Driver.java
+@@ -133,6 +133,8 @@
+ 
+ public class Driver implements CommandProcessor {
+ 
++  public static final String MAPREDUCE_WORKFLOW_NODE_NAME = "mapreduce.workflow.node.name";
++
+   static final private String CLASS_NAME = Driver.class.getName();
+   static final private Log LOG = LogFactory.getLog(CLASS_NAME);
+   static final private LogHelper console = new LogHelper(LOG);
+@@ -2025,9 +2027,9 @@ private TaskRunner launchTask(Task<? extends Serializable> tsk, String queryId,
+     }
+     if (tsk.isMapRedTask() && !(tsk instanceof ConditionalTask)) {
+       if (noName) {
+-        conf.setVar(HiveConf.ConfVars.HADOOPJOBNAME, jobname + "(" + tsk.getId() + ")");
++        conf.setVar(HiveConf.ConfVars.HADOOPJOBNAME, jobname + " (" + tsk.getId() + ")");
+       }
+-      conf.set("mapreduce.workflow.node.name", tsk.getId());
++      conf.set(MAPREDUCE_WORKFLOW_NODE_NAME, tsk.getId());
+       Utilities.setWorkflowAdjacencies(conf, plan);
+       cxt.incCurJobNo(1);
+       console.printInfo("Launching Job " + cxt.getCurJobNo() + " out of " + jobs);
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/DagUtils.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/DagUtils.java
+new file mode 100644
+index 0000000..aed1b2c
+--- /dev/null
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/DagUtils.java
+@@ -0,0 +1,39 @@
++/**
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ * <p/>
++ * http://www.apache.org/licenses/LICENSE-2.0
++ * <p/>
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.hadoop.hive.ql.exec;
++
++import com.google.common.base.Strings;
++
++import org.apache.hadoop.conf.Configuration;
++import org.apache.hadoop.hive.conf.HiveConf;
++import org.apache.hadoop.hive.ql.Driver;
++import org.apache.hadoop.mapreduce.MRJobConfig;
++
++
++public class DagUtils {
++
++  public static String getQueryName(Configuration conf) {
++    String name = HiveConf.getVar(conf, HiveConf.ConfVars.HIVEQUERYNAME);
++    if (Strings.isNullOrEmpty(name)) {
++      return conf.get(MRJobConfig.JOB_NAME);
++    } else {
++      return name + " (" + conf.get(Driver.MAPREDUCE_WORKFLOW_NODE_NAME) + ")";
++    }
++  }
++}
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/HiveSparkClientFactory.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/HiveSparkClientFactory.java
+index 1ab850c..8177de5 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/HiveSparkClientFactory.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/HiveSparkClientFactory.java
+@@ -57,8 +57,9 @@
+   private static final String SPARK_DEFAULT_REFERENCE_TRACKING = "false";
+   private static final String SPARK_WAIT_APP_COMPLETE = "spark.yarn.submit.waitAppCompletion";
+ 
+-  public static HiveSparkClient createHiveSparkClient(HiveConf hiveconf) throws Exception {
+-    Map<String, String> sparkConf = initiateSparkConf(hiveconf);
++  public static HiveSparkClient createHiveSparkClient(HiveConf hiveconf, String sessionId) throws Exception {
++    Map<String, String> sparkConf = initiateSparkConf(hiveconf, sessionId);
++
+     // Submit spark job through local spark context while spark master is local mode, otherwise submit
+     // spark job through remote spark context.
+     String master = sparkConf.get("spark.master");
+@@ -70,7 +71,7 @@ public static HiveSparkClient createHiveSparkClient(HiveConf hiveconf) throws Ex
+     }
+   }
+ 
+-  public static Map<String, String> initiateSparkConf(HiveConf hiveConf) {
++  public static Map<String, String> initiateSparkConf(HiveConf hiveConf, String sessionId) {
+     Map<String, String> sparkConf = new HashMap<String, String>();
+     HBaseConfiguration.addHbaseResources(hiveConf);
+ 
+@@ -78,8 +79,15 @@ public static HiveSparkClient createHiveSparkClient(HiveConf hiveconf) throws Ex
+     sparkConf.put("spark.master", SPARK_DEFAULT_MASTER);
+     final String appNameKey = "spark.app.name";
+     String appName = hiveConf.get(appNameKey);
++    final String sessionIdString = " (sessionId = " + sessionId + ")";
+     if (appName == null) {
+-      appName = SPARK_DEFAULT_APP_NAME;
++      if (sessionId == null) {
++        appName = SPARK_DEFAULT_APP_NAME;
++      } else {
++        appName = SPARK_DEFAULT_APP_NAME + sessionIdString;
++      }
++    } else {
++      appName = appName + sessionIdString;
+     }
+     sparkConf.put(appNameKey, appName);
+     sparkConf.put("spark.serializer", SPARK_DEFAULT_SERIALIZER);
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/RemoteHiveSparkClient.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/RemoteHiveSparkClient.java
+index 3a95eb3..7f3531d 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/RemoteHiveSparkClient.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/RemoteHiveSparkClient.java
+@@ -44,6 +44,7 @@
+ import org.apache.hadoop.hive.conf.HiveConfUtil;
+ import org.apache.hadoop.hive.ql.Context;
+ import org.apache.hadoop.hive.ql.DriverContext;
++import org.apache.hadoop.hive.ql.exec.DagUtils;
+ import org.apache.hadoop.hive.ql.exec.Utilities;
+ import org.apache.hadoop.hive.ql.exec.spark.status.SparkJobRef;
+ import org.apache.hadoop.hive.ql.exec.spark.status.impl.RemoteSparkJobRef;
+@@ -346,6 +347,8 @@ public Serializable call(JobContext jc) throws Exception {
+         new SparkPlanGenerator(jc.sc(), null, localJobConf, localScratchDir, sparkReporter);
+       SparkPlan plan = gen.generate(localSparkWork);
+ 
++      jc.sc().setJobGroup("queryId = " + localSparkWork.getQueryId(), DagUtils.getQueryName(localJobConf));
++
+       // Execute generated plan.
+       JavaPairRDD<HiveKey, BytesWritable> finalRDD = plan.generateGraph();
+       // We use Spark RDD async action to submit job as it's the only way to get jobId now.
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionImpl.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionImpl.java
+index 824fc10..aa9d197 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionImpl.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionImpl.java
+@@ -59,7 +59,7 @@ public void open(HiveConf conf) throws HiveException {
+     this.conf = conf;
+     isOpen = true;
+     try {
+-      hiveSparkClient = HiveSparkClientFactory.createHiveSparkClient(conf);
++      hiveSparkClient = HiveSparkClientFactory.createHiveSparkClient(conf, sessionId);
+     } catch (Throwable e) {
+       throw new HiveException("Failed to create spark client.", e);
+     }
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionManagerImpl.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionManagerImpl.java
+index 616807c..357e878 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionManagerImpl.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionManagerImpl.java
+@@ -78,7 +78,7 @@ public void setup(HiveConf hiveConf) throws HiveException {
+       synchronized (this) {
+         if (!inited) {
+           LOG.info("Setting up the session manager.");
+-          Map<String, String> conf = HiveSparkClientFactory.initiateSparkConf(hiveConf);
++          Map<String, String> conf = HiveSparkClientFactory.initiateSparkConf(hiveConf, null);
+           try {
+             SparkClientFactory.initialize(conf);
+             inited = true;
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/plan/SparkWork.java b/ql/src/java/org/apache/hadoop/hive/ql/plan/SparkWork.java
+index bb5dd79..4c7f6fd 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/plan/SparkWork.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/plan/SparkWork.java
+@@ -45,8 +45,10 @@
+ @SuppressWarnings("serial")
+ @Explain(displayName = "Spark")
+ public class SparkWork extends AbstractOperatorDesc {
++
+   private static int counter;
+-  private final String name;
++  private final String dagName;
++  private final String queryId;
+ 
+   private final Set<BaseWork> roots = new LinkedHashSet<BaseWork>();
+   private final Set<BaseWork> leaves = new LinkedHashSet<>();
+@@ -62,15 +64,19 @@
+ 
+   private Map<BaseWork, BaseWork> cloneToWork;
+ 
+-  public SparkWork(String name) {
+-    this.name = name + ":" + (++counter);
++  public SparkWork(String queryId) {
++    this.queryId = queryId;
++    this.dagName = queryId + ":" + (++counter);
+     cloneToWork = new HashMap<BaseWork, BaseWork>();
+   }
+ 
+-
+   @Explain(displayName = "DagName")
+   public String getName() {
+-    return name;
++    return this.dagName;
++  }
++
++  public String getQueryId() {
++    return this.queryId;
+   }
+ 
+   /**
+diff --git a/ql/src/test/queries/clientpositive/parallel.q b/ql/src/test/queries/clientpositive/parallel.q
+index 7cd4015..d343c53 100644
+--- a/ql/src/test/queries/clientpositive/parallel.q
++++ b/ql/src/test/queries/clientpositive/parallel.q
+@@ -1,4 +1,4 @@
+-set mapred.job.name='test_parallel';
++set hive.query.name='test_parallel';
+ set hive.exec.parallel=true;
+ set hive.input.format=org.apache.hadoop.hive.ql.io.HiveInputFormat;
+ 
+-- 
+1.7.9.5
+

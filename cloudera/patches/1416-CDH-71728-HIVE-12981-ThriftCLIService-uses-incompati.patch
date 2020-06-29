@@ -1,0 +1,56 @@
+From 57ae666596db7c720f62581885c62851dbe89eb5 Mon Sep 17 00:00:00 2001
+From: Sergey Shelukhin <sershe@apache.org>
+Date: Wed, 17 Feb 2016 19:32:35 -0800
+Subject: [PATCH 1416/1431] CDH-71728: HIVE-12981 : ThriftCLIService uses
+ incompatible getShortName() implementation (Bolke
+ de Bruin, reviewed by Sergey Shelukhin)
+ ==C5_APPROVED_BUGFIX== (cherry picked from commit
+ 98fe43d59db681bb143cb047083a1b8c90473b03)
+
+Change-Id: I7d349ff8fb0abf576fbb3c3dff5441b4b68423f6
+---
+ .../hive/service/cli/thrift/ThriftCLIService.java  |   12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/service/src/java/org/apache/hive/service/cli/thrift/ThriftCLIService.java b/service/src/java/org/apache/hive/service/cli/thrift/ThriftCLIService.java
+index ce08ae3..4014cee 100644
+--- a/service/src/java/org/apache/hive/service/cli/thrift/ThriftCLIService.java
++++ b/service/src/java/org/apache/hive/service/cli/thrift/ThriftCLIService.java
+@@ -36,6 +36,8 @@
+ import org.apache.hadoop.hive.conf.HiveConf;
+ import org.apache.hadoop.hive.conf.HiveConf.ConfVars;
+ import org.apache.hadoop.hive.common.ServerUtils;
++import org.apache.hadoop.hive.shims.HadoopShims.KerberosNameShim;
++import org.apache.hadoop.hive.shims.ShimLoader;
+ import org.apache.hive.service.AbstractService;
+ import org.apache.hive.service.ServiceException;
+ import org.apache.hive.service.ServiceUtils;
+@@ -361,7 +363,7 @@ private String getIpAddress() {
+    * @return
+    * @throws HiveSQLException
+    */
+-  private String getUserName(TOpenSessionReq req) throws HiveSQLException {
++  private String getUserName(TOpenSessionReq req) throws HiveSQLException, IOException {
+     String userName = null;
+     if (hiveAuthFactory != null && hiveAuthFactory.isSASLWithKerberizedHadoop()) {
+       userName = hiveAuthFactory.getRemoteUser();
+@@ -386,12 +388,12 @@ private String getUserName(TOpenSessionReq req) throws HiveSQLException {
+     return effectiveClientUser;
+   }
+ 
+-  private String getShortName(String userName) {
++  private String getShortName(String userName) throws IOException {
+     String ret = null;
++
+     if (userName != null) {
+-      int indexOfDomainMatch = ServiceUtils.indexOfDomainMatch(userName);
+-      ret = (indexOfDomainMatch <= 0) ? userName :
+-          userName.substring(0, indexOfDomainMatch);
++      KerberosNameShim fullKerberosName = ShimLoader.getHadoopShims().getKerberosNameShim(userName);
++      ret = fullKerberosName.getShortName();
+     }
+ 
+     return ret;
+-- 
+1.7.9.5
+

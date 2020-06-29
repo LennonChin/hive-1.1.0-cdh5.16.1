@@ -1,0 +1,1327 @@
+From 5616e88955dbeef6666d315bb5be2d5efa8e1e03 Mon Sep 17 00:00:00 2001
+From: Yongzhi Chen <ychen@cloudera.com>
+Date: Thu, 19 Jul 2018 19:33:28 -0400
+Subject: [PATCH 1402/1431] CDH-70897: HIVE-19259: Create view on tables
+ having union all fail with 'Table not found'
+ (Jesus Camacho Rodriguez, reviewed by Ashutosh
+ Chauhan)
+
+Change-Id: Iba3066c23481cb4ceb4141526795cd2e57a848b4
+---
+ .../hadoop/hive/ql/parse/SemanticAnalyzer.java     |   15 +-
+ ql/src/test/queries/clientpositive/union38.q       |   38 ++++
+ .../results/clientpositive/explain_logical.q.out   |    4 +-
+ .../results/clientpositive/groupby_sort_1_23.q.out |    6 +-
+ .../clientpositive/groupby_sort_skew_1_23.q.out    |    6 +-
+ .../test/results/clientpositive/input_part7.q.out  |    4 +-
+ ql/src/test/results/clientpositive/join34.q.out    |    2 +-
+ ql/src/test/results/clientpositive/join35.q.out    |    4 +-
+ .../results/clientpositive/multiMapJoin2.q.out     |   36 ++--
+ .../results/clientpositive/multi_join_union.q.out  |    8 +-
+ .../results/clientpositive/optimize_nullscan.q.out |   20 +-
+ .../results/clientpositive/ppd_union_view.q.out    |    6 +-
+ .../results/clientpositive/skewjoin_mapjoin7.q.out |    8 +-
+ .../clientpositive/spark/groupby_sort_1_23.q.out   |    8 +-
+ .../spark/groupby_sort_skew_1_23.q.out             |    8 +-
+ .../test/results/clientpositive/spark/join34.q.out |    4 +-
+ .../test/results/clientpositive/spark/join35.q.out |    4 +-
+ .../clientpositive/spark/optimize_nullscan.q.out   |   18 +-
+ .../results/clientpositive/spark/union22.q.out     |    6 +-
+ .../results/clientpositive/spark/union24.q.out     |   24 +--
+ .../results/clientpositive/spark/union_ppr.q.out   |    8 +-
+ ql/src/test/results/clientpositive/union22.q.out   |   12 +-
+ ql/src/test/results/clientpositive/union24.q.out   |   24 +--
+ ql/src/test/results/clientpositive/union34.q.out   |    4 +-
+ ql/src/test/results/clientpositive/union38.q.out   |  198 ++++++++++++++++++++
+ ql/src/test/results/clientpositive/union_ppr.q.out |    4 +-
+ .../results/clientpositive/union_remove_12.q.out   |    4 +-
+ .../results/clientpositive/union_remove_13.q.out   |    4 +-
+ .../results/clientpositive/union_remove_14.q.out   |    4 +-
+ 29 files changed, 364 insertions(+), 127 deletions(-)
+ create mode 100644 ql/src/test/queries/clientpositive/union38.q
+ create mode 100644 ql/src/test/results/clientpositive/union38.q.out
+
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/parse/SemanticAnalyzer.java b/ql/src/java/org/apache/hadoop/hive/ql/parse/SemanticAnalyzer.java
+index 4272f5c..b9b5223 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/parse/SemanticAnalyzer.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/parse/SemanticAnalyzer.java
+@@ -431,6 +431,7 @@ public void doPhase1QBExpr(ASTNode ast, QBExpr qbexpr, String id, String alias)
+       throws SemanticException {
+     doPhase1QBExpr(ast, qbexpr, id, alias, false);
+   }
++
+   @SuppressWarnings("nls")
+   public void doPhase1QBExpr(ASTNode ast, QBExpr qbexpr, String id, String alias, boolean insideView)
+       throws SemanticException {
+@@ -451,16 +452,16 @@ public void doPhase1QBExpr(ASTNode ast, QBExpr qbexpr, String id, String alias,
+       qbexpr.setOpcode(QBExpr.Opcode.UNION);
+       // query 1
+       assert (ast.getChild(0) != null);
+-      QBExpr qbexpr1 = new QBExpr(alias + "-subquery1");
+-      doPhase1QBExpr((ASTNode) ast.getChild(0), qbexpr1, id + "-subquery1",
+-          alias + "-subquery1", insideView);
++      QBExpr qbexpr1 = new QBExpr(alias + SUBQUERY_TAG_1);
++      doPhase1QBExpr((ASTNode) ast.getChild(0), qbexpr1, id,
++          alias + SUBQUERY_TAG_1, insideView);
+       qbexpr.setQBExpr1(qbexpr1);
+ 
+       // query 2
+-      assert (ast.getChild(0) != null);
+-      QBExpr qbexpr2 = new QBExpr(alias + "-subquery2");
+-      doPhase1QBExpr((ASTNode) ast.getChild(1), qbexpr2, id + "-subquery2",
+-          alias + "-subquery2", insideView);
++      assert (ast.getChild(1) != null);
++      QBExpr qbexpr2 = new QBExpr(alias + SUBQUERY_TAG_2);
++      doPhase1QBExpr((ASTNode) ast.getChild(1), qbexpr2, id,
++          alias + SUBQUERY_TAG_2, insideView);
+       qbexpr.setQBExpr2(qbexpr2);
+     }
+       break;
+diff --git a/ql/src/test/queries/clientpositive/union38.q b/ql/src/test/queries/clientpositive/union38.q
+new file mode 100644
+index 0000000..557a640
+--- /dev/null
++++ b/ql/src/test/queries/clientpositive/union38.q
+@@ -0,0 +1,38 @@
++--create table union38_test1 
++
++create table union38_test1( name String, id int, address String); 
++insert into union38_test1 values("Young", 1, "Sydney"), ("Jin", 2, "Mel"); 
++analyze table union38_test1 compute statistics for columns; 
++
++create view union38_test1_view as select * from union38_test1; 
++select * from union38_test1_view; 
++
++
++--create table union38_test2 
++
++create table union38_test2( name String, id int, address String); 
++insert into union38_test2 values("Eun", 3, "Bri"), ("Kim", 4, "Ad"); 
++
++create view union38_test2_view as select * from union38_test2; 
++select * from union38_test2_view; 
++
++select * from union38_test1 union all select * from union38_test2; 
++select * from union38_test1_view union all select * from union38_test2_view; 
++
++
++--create view union38_test_view using tables with union all 
++
++create view union38_test_view1 as select * from union38_test1 union all select * from union38_test2; 
++select * from union38_test_view1; 
++
++
++--create view union38_test_view using temp table with union all 
++
++create view union38_test_view3 as with union38_tmp_1 as ( select * from union38_test1 ), union38_tmp_2 as (select * from union38_test2 ) select * from union38_tmp_1 union all select * from union38_tmp_2; 
++select * from union38_test_view3; 
++
++
++--create table test_table using temp table with union all 
++
++create table union38_test_table1 as with union38_tmp_1 as ( select * from union38_test1 ), union38_tmp_2 as (select * from union38_test2 ) select * from union38_tmp_1 union all select * from union38_tmp_2; 
++select * from union38_test_table1; 
+diff --git a/ql/src/test/results/clientpositive/explain_logical.q.out b/ql/src/test/results/clientpositive/explain_logical.q.out
+index cc0e311..ff58187 100644
+--- a/ql/src/test/results/clientpositive/explain_logical.q.out
++++ b/ql/src/test/results/clientpositive/explain_logical.q.out
+@@ -270,7 +270,7 @@ TOK_QUERY
+ 
+ 
+ LOGICAL PLAN:
+-null-subquery1:$hdt$_0-subquery1:src 
++$hdt$_0-subquery1:src 
+   TableScan (TS_0)
+     alias: src
+     Statistics: Num rows: 500 Data size: 5312 Basic stats: COMPLETE Column stats: NONE
+@@ -287,7 +287,7 @@ null-subquery1:$hdt$_0-subquery1:src
+               input format: org.apache.hadoop.mapred.TextInputFormat
+               output format: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
+               serde: org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe
+-null-subquery2:$hdt$_0-subquery2:$hdt$_0:srcpart 
++$hdt$_0-subquery2:$hdt$_0:srcpart 
+   TableScan (TS_2)
+     alias: srcpart
+     Statistics: Num rows: 2000 Data size: 21248 Basic stats: COMPLETE Column stats: NONE
+diff --git a/ql/src/test/results/clientpositive/groupby_sort_1_23.q.out b/ql/src/test/results/clientpositive/groupby_sort_1_23.q.out
+index 3be0671..297c306 100644
+--- a/ql/src/test/results/clientpositive/groupby_sort_1_23.q.out
++++ b/ql/src/test/results/clientpositive/groupby_sort_1_23.q.out
+@@ -2590,7 +2590,7 @@ STAGE PLANS:
+               name: default.t1
+             name: default.t1
+       Truncated Path -> Alias:
+-        /t1 [null-subquery1:$hdt$_0-subquery1:$hdt$_0:$hdt$_0:t1, null-subquery2:$hdt$_0-subquery2:$hdt$_0:$hdt$_0:t1]
++        /t1 [$hdt$_0-subquery1:$hdt$_0:$hdt$_0:t1, $hdt$_0-subquery2:$hdt$_0:$hdt$_0:t1]
+ 
+   Stage: Stage-7
+     Conditional Operator
+@@ -3013,7 +3013,7 @@ STAGE PLANS:
+               name: default.t1
+             name: default.t1
+       Truncated Path -> Alias:
+-        /t1 [null-subquery2:$hdt$_0-subquery2:$hdt$_0:$hdt$_0:t1]
++        /t1 [$hdt$_0-subquery2:$hdt$_0:$hdt$_0:t1]
+       Needs Tagging: false
+       Reduce Operator Tree:
+         Group By Operator
+@@ -3209,7 +3209,7 @@ STAGE PLANS:
+               name: default.t1
+             name: default.t1
+       Truncated Path -> Alias:
+-        /t1 [null-subquery1:$hdt$_0-subquery1:$hdt$_0:$hdt$_0:$hdt$_0:t1]
++        /t1 [$hdt$_0-subquery1:$hdt$_0:$hdt$_0:$hdt$_0:t1]
+ #### A masked pattern was here ####
+ 
+   Stage: Stage-8
+diff --git a/ql/src/test/results/clientpositive/groupby_sort_skew_1_23.q.out b/ql/src/test/results/clientpositive/groupby_sort_skew_1_23.q.out
+index a7f259b..d63be6b 100644
+--- a/ql/src/test/results/clientpositive/groupby_sort_skew_1_23.q.out
++++ b/ql/src/test/results/clientpositive/groupby_sort_skew_1_23.q.out
+@@ -2915,7 +2915,7 @@ STAGE PLANS:
+               name: default.t1
+             name: default.t1
+       Truncated Path -> Alias:
+-        /t1 [null-subquery1:$hdt$_0-subquery1:$hdt$_0:$hdt$_0:t1, null-subquery2:$hdt$_0-subquery2:$hdt$_0:$hdt$_0:t1]
++        /t1 [$hdt$_0-subquery1:$hdt$_0:$hdt$_0:t1, $hdt$_0-subquery2:$hdt$_0:$hdt$_0:t1]
+ 
+   Stage: Stage-7
+     Conditional Operator
+@@ -3339,7 +3339,7 @@ STAGE PLANS:
+               name: default.t1
+             name: default.t1
+       Truncated Path -> Alias:
+-        /t1 [null-subquery2:$hdt$_0-subquery2:$hdt$_0:$hdt$_0:t1]
++        /t1 [$hdt$_0-subquery2:$hdt$_0:$hdt$_0:t1]
+       Needs Tagging: false
+       Reduce Operator Tree:
+         Group By Operator
+@@ -3599,7 +3599,7 @@ STAGE PLANS:
+               name: default.t1
+             name: default.t1
+       Truncated Path -> Alias:
+-        /t1 [null-subquery1:$hdt$_0-subquery1:$hdt$_0:$hdt$_0:$hdt$_0:t1]
++        /t1 [$hdt$_0-subquery1:$hdt$_0:$hdt$_0:$hdt$_0:t1]
+ #### A masked pattern was here ####
+ 
+   Stage: Stage-8
+diff --git a/ql/src/test/results/clientpositive/input_part7.q.out b/ql/src/test/results/clientpositive/input_part7.q.out
+index f76a912..1bce033 100644
+--- a/ql/src/test/results/clientpositive/input_part7.q.out
++++ b/ql/src/test/results/clientpositive/input_part7.q.out
+@@ -261,8 +261,8 @@ STAGE PLANS:
+               name: default.srcpart
+             name: default.srcpart
+       Truncated Path -> Alias:
+-        /srcpart/ds=2008-04-08/hr=11 [null-subquery1:a-subquery1:x, null-subquery2:a-subquery2:y]
+-        /srcpart/ds=2008-04-08/hr=12 [null-subquery1:a-subquery1:x, null-subquery2:a-subquery2:y]
++        /srcpart/ds=2008-04-08/hr=11 [a-subquery1:x, a-subquery2:y]
++        /srcpart/ds=2008-04-08/hr=12 [a-subquery1:x, a-subquery2:y]
+       Needs Tagging: false
+       Reduce Operator Tree:
+         Select Operator
+diff --git a/ql/src/test/results/clientpositive/join34.q.out b/ql/src/test/results/clientpositive/join34.q.out
+index 8dfce3b..57ca389 100644
+--- a/ql/src/test/results/clientpositive/join34.q.out
++++ b/ql/src/test/results/clientpositive/join34.q.out
+@@ -366,7 +366,7 @@ STAGE PLANS:
+               name: default.src1
+             name: default.src1
+       Truncated Path -> Alias:
+-        /src [$hdt$_0-subquery1:$hdt$_0-subquery1:x, $hdt$_0-subquery2:$hdt$_0-subquery2:x]
++        /src [$hdt$_0:$hdt$_0-subquery1:x, $hdt$_0:$hdt$_0-subquery2:x]
+ 
+   Stage: Stage-0
+     Move Operator
+diff --git a/ql/src/test/results/clientpositive/join35.q.out b/ql/src/test/results/clientpositive/join35.q.out
+index f82678b..08b85c6 100644
+--- a/ql/src/test/results/clientpositive/join35.q.out
++++ b/ql/src/test/results/clientpositive/join35.q.out
+@@ -224,7 +224,7 @@ STAGE PLANS:
+               name: default.src
+             name: default.src
+       Truncated Path -> Alias:
+-        /src [$hdt$_0-subquery1:$hdt$_0-subquery1:$hdt$_0:$hdt$_0:x]
++        /src [$hdt$_0:$hdt$_0-subquery1:$hdt$_0:$hdt$_0:x]
+       Needs Tagging: false
+       Reduce Operator Tree:
+         Group By Operator
+@@ -561,7 +561,7 @@ STAGE PLANS:
+               name: default.src
+             name: default.src
+       Truncated Path -> Alias:
+-        /src [$hdt$_0-subquery2:$hdt$_0-subquery2:$hdt$_0:$hdt$_0:x]
++        /src [$hdt$_0:$hdt$_0-subquery2:$hdt$_0:$hdt$_0:x]
+       Needs Tagging: false
+       Reduce Operator Tree:
+         Group By Operator
+diff --git a/ql/src/test/results/clientpositive/multiMapJoin2.q.out b/ql/src/test/results/clientpositive/multiMapJoin2.q.out
+index a8a38ef..7fc278e 100644
+--- a/ql/src/test/results/clientpositive/multiMapJoin2.q.out
++++ b/ql/src/test/results/clientpositive/multiMapJoin2.q.out
+@@ -21,14 +21,14 @@ STAGE PLANS:
+   Stage: Stage-8
+     Map Reduce Local Work
+       Alias -> Map Local Tables:
+-        null-subquery1:$hdt$_0-subquery1:$hdt$_1:y1 
++        $hdt$_0-subquery1:$hdt$_1:y1 
+           Fetch Operator
+             limit: -1
+-        null-subquery2:$hdt$_0-subquery2:$hdt$_1:y1 
++        $hdt$_0-subquery2:$hdt$_1:y1 
+           Fetch Operator
+             limit: -1
+       Alias -> Map Local Operator Tree:
+-        null-subquery1:$hdt$_0-subquery1:$hdt$_1:y1 
++        $hdt$_0-subquery1:$hdt$_1:y1 
+           TableScan
+             alias: y1
+             Statistics: Num rows: 25 Data size: 191 Basic stats: COMPLETE Column stats: NONE
+@@ -43,7 +43,7 @@ STAGE PLANS:
+                   keys:
+                     0 _col0 (type: string)
+                     1 _col0 (type: string)
+-        null-subquery2:$hdt$_0-subquery2:$hdt$_1:y1 
++        $hdt$_0-subquery2:$hdt$_1:y1 
+           TableScan
+             alias: y1
+             Statistics: Num rows: 25 Data size: 191 Basic stats: COMPLETE Column stats: NONE
+@@ -250,11 +250,11 @@ STAGE PLANS:
+   Stage: Stage-9
+     Map Reduce Local Work
+       Alias -> Map Local Tables:
+-        null-subquery2:$hdt$_0-subquery2:$hdt$_1:y1 
++        $hdt$_0-subquery2:$hdt$_1:y1 
+           Fetch Operator
+             limit: -1
+       Alias -> Map Local Operator Tree:
+-        null-subquery2:$hdt$_0-subquery2:$hdt$_1:y1 
++        $hdt$_0-subquery2:$hdt$_1:y1 
+           TableScan
+             alias: y1
+             Statistics: Num rows: 25 Data size: 191 Basic stats: COMPLETE Column stats: NONE
+@@ -303,11 +303,11 @@ STAGE PLANS:
+   Stage: Stage-8
+     Map Reduce Local Work
+       Alias -> Map Local Tables:
+-        null-subquery1:$hdt$_0-subquery1:$hdt$_1:y1 
++        $hdt$_0-subquery1:$hdt$_1:y1 
+           Fetch Operator
+             limit: -1
+       Alias -> Map Local Operator Tree:
+-        null-subquery1:$hdt$_0-subquery1:$hdt$_1:y1 
++        $hdt$_0-subquery1:$hdt$_1:y1 
+           TableScan
+             alias: y1
+             Statistics: Num rows: 25 Data size: 191 Basic stats: COMPLETE Column stats: NONE
+@@ -531,11 +531,11 @@ STAGE PLANS:
+   Stage: Stage-6
+     Map Reduce Local Work
+       Alias -> Map Local Tables:
+-        null-subquery2:$hdt$_0-subquery2:$hdt$_1:x1 
++        $hdt$_0-subquery2:$hdt$_1:x1 
+           Fetch Operator
+             limit: -1
+       Alias -> Map Local Operator Tree:
+-        null-subquery2:$hdt$_0-subquery2:$hdt$_1:x1 
++        $hdt$_0-subquery2:$hdt$_1:x1 
+           TableScan
+             alias: x1
+             Statistics: Num rows: 25 Data size: 191 Basic stats: COMPLETE Column stats: NONE
+@@ -2154,11 +2154,11 @@ STAGE PLANS:
+   Stage: Stage-15
+     Map Reduce Local Work
+       Alias -> Map Local Tables:
+-        null-subquery1:$hdt$_0-subquery1:$hdt$_0:$hdt$_1:$hdt$_1:$hdt$_1:a 
++        $hdt$_0-subquery1:$hdt$_0:$hdt$_1:$hdt$_1:$hdt$_1:a 
+           Fetch Operator
+             limit: -1
+       Alias -> Map Local Operator Tree:
+-        null-subquery1:$hdt$_0-subquery1:$hdt$_0:$hdt$_1:$hdt$_1:$hdt$_1:a 
++        $hdt$_0-subquery1:$hdt$_0:$hdt$_1:$hdt$_1:$hdt$_1:a 
+           TableScan
+             alias: a
+             Statistics: Num rows: 500 Data size: 5312 Basic stats: COMPLETE Column stats: NONE
+@@ -2223,14 +2223,14 @@ STAGE PLANS:
+   Stage: Stage-14
+     Map Reduce Local Work
+       Alias -> Map Local Tables:
+-        null-subquery1:$hdt$_0-subquery1:$hdt$_0:$hdt$_0:a 
++        $hdt$_0-subquery1:$hdt$_0:$hdt$_0:a 
+           Fetch Operator
+             limit: -1
+-        null-subquery2:$hdt$_0-subquery2:$hdt$_0:$hdt$_0:a 
++        $hdt$_0-subquery2:$hdt$_0:$hdt$_0:a 
+           Fetch Operator
+             limit: -1
+       Alias -> Map Local Operator Tree:
+-        null-subquery1:$hdt$_0-subquery1:$hdt$_0:$hdt$_0:a 
++        $hdt$_0-subquery1:$hdt$_0:$hdt$_0:a 
+           TableScan
+             alias: a
+             Statistics: Num rows: 500 Data size: 5312 Basic stats: COMPLETE Column stats: NONE
+@@ -2245,7 +2245,7 @@ STAGE PLANS:
+                   keys:
+                     0 _col0 (type: string)
+                     1 _col0 (type: string)
+-        null-subquery2:$hdt$_0-subquery2:$hdt$_0:$hdt$_0:a 
++        $hdt$_0-subquery2:$hdt$_0:$hdt$_0:a 
+           TableScan
+             alias: a
+             Statistics: Num rows: 500 Data size: 5312 Basic stats: COMPLETE Column stats: NONE
+@@ -2306,11 +2306,11 @@ STAGE PLANS:
+   Stage: Stage-16
+     Map Reduce Local Work
+       Alias -> Map Local Tables:
+-        null-subquery2:$hdt$_0-subquery2:$hdt$_0:$hdt$_1:$hdt$_1:$hdt$_1:a 
++        $hdt$_0-subquery2:$hdt$_0:$hdt$_1:$hdt$_1:$hdt$_1:a 
+           Fetch Operator
+             limit: -1
+       Alias -> Map Local Operator Tree:
+-        null-subquery2:$hdt$_0-subquery2:$hdt$_0:$hdt$_1:$hdt$_1:$hdt$_1:a 
++        $hdt$_0-subquery2:$hdt$_0:$hdt$_1:$hdt$_1:$hdt$_1:a 
+           TableScan
+             alias: a
+             Statistics: Num rows: 500 Data size: 5312 Basic stats: COMPLETE Column stats: NONE
+diff --git a/ql/src/test/results/clientpositive/multi_join_union.q.out b/ql/src/test/results/clientpositive/multi_join_union.q.out
+index 3f25dc8..776daa9 100644
+--- a/ql/src/test/results/clientpositive/multi_join_union.q.out
++++ b/ql/src/test/results/clientpositive/multi_join_union.q.out
+@@ -60,10 +60,10 @@ STAGE PLANS:
+         a 
+           Fetch Operator
+             limit: -1
+-        c-subquery1:a-subquery1:src13 
++        c:a-subquery1:src13 
+           Fetch Operator
+             limit: -1
+-        c-subquery2:a-subquery2:src14 
++        c:a-subquery2:src14 
+           Fetch Operator
+             limit: -1
+       Alias -> Map Local Operator Tree:
+@@ -78,7 +78,7 @@ STAGE PLANS:
+                 keys:
+                   0 key (type: string)
+                   1 key (type: string)
+-        c-subquery1:a-subquery1:src13 
++        c:a-subquery1:src13 
+           TableScan
+             alias: src13
+             Statistics: Num rows: 500 Data size: 5312 Basic stats: COMPLETE Column stats: NONE
+@@ -95,7 +95,7 @@ STAGE PLANS:
+                     keys:
+                       0 _col6 (type: string)
+                       1 _col1 (type: string)
+-        c-subquery2:a-subquery2:src14 
++        c:a-subquery2:src14 
+           TableScan
+             alias: src14
+             Statistics: Num rows: 500 Data size: 5312 Basic stats: COMPLETE Column stats: NONE
+diff --git a/ql/src/test/results/clientpositive/optimize_nullscan.q.out b/ql/src/test/results/clientpositive/optimize_nullscan.q.out
+index 148c82c..16352ad 100644
+--- a/ql/src/test/results/clientpositive/optimize_nullscan.q.out
++++ b/ql/src/test/results/clientpositive/optimize_nullscan.q.out
+@@ -762,7 +762,7 @@ STAGE PLANS:
+                   value expressions: _col0 (type: bigint)
+                   auto parallelism: false
+       Path -> Alias:
+-        -mr-10004default.src{} [null-subquery1:_u1-subquery1:src]
++        -mr-10004default.src{} [_u1-subquery1:src]
+       Path -> Partition:
+         -mr-10004default.src{} 
+           Partition
+@@ -808,7 +808,7 @@ STAGE PLANS:
+               name: default.src
+             name: default.src
+       Truncated Path -> Alias:
+-        -mr-10004default.src{} [null-subquery1:_u1-subquery1:src]
++        -mr-10004default.src{} [_u1-subquery1:src]
+       Needs Tagging: false
+       Reduce Operator Tree:
+         Group By Operator
+@@ -1143,10 +1143,10 @@ STAGE PLANS:
+               name: default.srcpart
+             name: default.srcpart
+       Truncated Path -> Alias:
+-        /srcpart/ds=2008-04-08/hr=11 [null-subquery2:_u1-subquery2:srcpart]
+-        /srcpart/ds=2008-04-08/hr=12 [null-subquery2:_u1-subquery2:srcpart]
+-        /srcpart/ds=2008-04-09/hr=11 [null-subquery2:_u1-subquery2:srcpart]
+-        /srcpart/ds=2008-04-09/hr=12 [null-subquery2:_u1-subquery2:srcpart]
++        /srcpart/ds=2008-04-08/hr=11 [_u1-subquery2:srcpart]
++        /srcpart/ds=2008-04-08/hr=12 [_u1-subquery2:srcpart]
++        /srcpart/ds=2008-04-09/hr=11 [_u1-subquery2:srcpart]
++        /srcpart/ds=2008-04-09/hr=12 [_u1-subquery2:srcpart]
+       Needs Tagging: false
+       Reduce Operator Tree:
+         Group By Operator
+@@ -1743,7 +1743,7 @@ STAGE PLANS:
+                 tag: 0
+                 auto parallelism: false
+       Path -> Alias:
+-        -mr-10004default.src{} [null-subquery2:a-subquery2:src]
++        -mr-10004default.src{} [a-subquery2:src]
+       Path -> Partition:
+         -mr-10004default.src{} 
+           Partition
+@@ -1789,7 +1789,7 @@ STAGE PLANS:
+               name: default.src
+             name: default.src
+       Truncated Path -> Alias:
+-        -mr-10004default.src{} [null-subquery2:a-subquery2:src]
++        -mr-10004default.src{} [a-subquery2:src]
+       Needs Tagging: true
+       Reduce Operator Tree:
+         Join Operator
+@@ -1882,7 +1882,7 @@ STAGE PLANS:
+                     GatherStats: false
+                     MultiFileSpray: false
+       Path -> Alias:
+-        -mr-10003default.src{} [null-subquery1:a-subquery1:src]
++        -mr-10003default.src{} [a-subquery1:src]
+ #### A masked pattern was here ####
+       Path -> Partition:
+         -mr-10003default.src{} 
+@@ -1949,7 +1949,7 @@ STAGE PLANS:
+                 serialization.lib org.apache.hadoop.hive.serde2.lazybinary.LazyBinarySerDe
+               serde: org.apache.hadoop.hive.serde2.lazybinary.LazyBinarySerDe
+       Truncated Path -> Alias:
+-        -mr-10003default.src{} [null-subquery1:a-subquery1:src]
++        -mr-10003default.src{} [a-subquery1:src]
+ #### A masked pattern was here ####
+ 
+   Stage: Stage-0
+diff --git a/ql/src/test/results/clientpositive/ppd_union_view.q.out b/ql/src/test/results/clientpositive/ppd_union_view.q.out
+index 298d7a4..5c0b13a 100644
+--- a/ql/src/test/results/clientpositive/ppd_union_view.q.out
++++ b/ql/src/test/results/clientpositive/ppd_union_view.q.out
+@@ -290,8 +290,8 @@ STAGE PLANS:
+               name: default.t1_old
+             name: default.t1_old
+       Truncated Path -> Alias:
+-        /t1_mapping/ds=2011-10-13 [t1-subquery2:subq-subquery2:t1_mapping]
+-        /t1_old/ds=2011-10-13 [t1-subquery2:subq-subquery2:t1_old]
++        /t1_mapping/ds=2011-10-13 [t1:subq-subquery2:t1_mapping]
++        /t1_old/ds=2011-10-13 [t1:subq-subquery2:t1_old]
+       Needs Tagging: true
+       Reduce Operator Tree:
+         Join Operator
+@@ -621,7 +621,7 @@ STAGE PLANS:
+               name: default.t1_new
+             name: default.t1_new
+       Truncated Path -> Alias:
+-        /t1_new/ds=2011-10-15 [null-subquery1:$hdt$_0-subquery1:t1_new]
++        /t1_new/ds=2011-10-15 [$hdt$_0-subquery1:t1_new]
+ #### A masked pattern was here ####
+ 
+   Stage: Stage-0
+diff --git a/ql/src/test/results/clientpositive/skewjoin_mapjoin7.q.out b/ql/src/test/results/clientpositive/skewjoin_mapjoin7.q.out
+index 69e562f..8282161 100644
+--- a/ql/src/test/results/clientpositive/skewjoin_mapjoin7.q.out
++++ b/ql/src/test/results/clientpositive/skewjoin_mapjoin7.q.out
+@@ -60,14 +60,14 @@ STAGE PLANS:
+   Stage: Stage-16
+     Map Reduce Local Work
+       Alias -> Map Local Tables:
+-        null-subquery1:subq1-subquery1:a 
++        subq1-subquery1:a 
+           Fetch Operator
+             limit: -1
+         subquery1:a 
+           Fetch Operator
+             limit: -1
+       Alias -> Map Local Operator Tree:
+-        null-subquery1:subq1-subquery1:a 
++        subq1-subquery1:a 
+           TableScan
+             alias: a
+             Statistics: Num rows: 1 Data size: 30 Basic stats: COMPLETE Column stats: NONE
+@@ -183,14 +183,14 @@ STAGE PLANS:
+   Stage: Stage-17
+     Map Reduce Local Work
+       Alias -> Map Local Tables:
+-        null-subquery2:subq1-subquery2:a 
++        subq1-subquery2:a 
+           Fetch Operator
+             limit: -1
+         subquery2:a 
+           Fetch Operator
+             limit: -1
+       Alias -> Map Local Operator Tree:
+-        null-subquery2:subq1-subquery2:a 
++        subq1-subquery2:a 
+           TableScan
+             alias: a
+             Statistics: Num rows: 1 Data size: 30 Basic stats: COMPLETE Column stats: NONE
+diff --git a/ql/src/test/results/clientpositive/spark/groupby_sort_1_23.q.out b/ql/src/test/results/clientpositive/spark/groupby_sort_1_23.q.out
+index e71c3e9..f0245bf 100644
+--- a/ql/src/test/results/clientpositive/spark/groupby_sort_1_23.q.out
++++ b/ql/src/test/results/clientpositive/spark/groupby_sort_1_23.q.out
+@@ -2017,7 +2017,7 @@ STAGE PLANS:
+                     name: default.t1
+                   name: default.t1
+             Truncated Path -> Alias:
+-              /t1 [null-subquery1:subq1-subquery1:t1]
++              /t1 [subq1-subquery1:t1]
+         Map 2 
+             Map Operator Tree:
+                 TableScan
+@@ -2121,7 +2121,7 @@ STAGE PLANS:
+                     name: default.t1
+                   name: default.t1
+             Truncated Path -> Alias:
+-              /t1 [null-subquery2:subq1-subquery2:t1]
++              /t1 [subq1-subquery2:t1]
+ 
+   Stage: Stage-0
+     Move Operator
+@@ -2391,7 +2391,7 @@ STAGE PLANS:
+                     name: default.t1
+                   name: default.t1
+             Truncated Path -> Alias:
+-              /t1 [null-subquery1:subq1-subquery1:t1]
++              /t1 [subq1-subquery1:t1]
+         Map 2 
+             Map Operator Tree:
+                 TableScan
+@@ -2468,7 +2468,7 @@ STAGE PLANS:
+                     name: default.t1
+                   name: default.t1
+             Truncated Path -> Alias:
+-              /t1 [null-subquery2:subq1-subquery2:t1]
++              /t1 [subq1-subquery2:t1]
+         Reducer 3 
+             Needs Tagging: false
+             Reduce Operator Tree:
+diff --git a/ql/src/test/results/clientpositive/spark/groupby_sort_skew_1_23.q.out b/ql/src/test/results/clientpositive/spark/groupby_sort_skew_1_23.q.out
+index 7d9c793..914fa9f 100644
+--- a/ql/src/test/results/clientpositive/spark/groupby_sort_skew_1_23.q.out
++++ b/ql/src/test/results/clientpositive/spark/groupby_sort_skew_1_23.q.out
+@@ -2089,7 +2089,7 @@ STAGE PLANS:
+                     name: default.t1
+                   name: default.t1
+             Truncated Path -> Alias:
+-              /t1 [null-subquery1:subq1-subquery1:t1]
++              /t1 [subq1-subquery1:t1]
+         Map 2 
+             Map Operator Tree:
+                 TableScan
+@@ -2193,7 +2193,7 @@ STAGE PLANS:
+                     name: default.t1
+                   name: default.t1
+             Truncated Path -> Alias:
+-              /t1 [null-subquery2:subq1-subquery2:t1]
++              /t1 [subq1-subquery2:t1]
+ 
+   Stage: Stage-0
+     Move Operator
+@@ -2464,7 +2464,7 @@ STAGE PLANS:
+                     name: default.t1
+                   name: default.t1
+             Truncated Path -> Alias:
+-              /t1 [null-subquery1:subq1-subquery1:t1]
++              /t1 [subq1-subquery1:t1]
+         Map 2 
+             Map Operator Tree:
+                 TableScan
+@@ -2541,7 +2541,7 @@ STAGE PLANS:
+                     name: default.t1
+                   name: default.t1
+             Truncated Path -> Alias:
+-              /t1 [null-subquery2:subq1-subquery2:t1]
++              /t1 [subq1-subquery2:t1]
+         Reducer 3 
+             Needs Tagging: false
+             Reduce Operator Tree:
+diff --git a/ql/src/test/results/clientpositive/spark/join34.q.out b/ql/src/test/results/clientpositive/spark/join34.q.out
+index 15c50ba..6d2d275 100644
+--- a/ql/src/test/results/clientpositive/spark/join34.q.out
++++ b/ql/src/test/results/clientpositive/spark/join34.q.out
+@@ -212,7 +212,7 @@ STAGE PLANS:
+                     name: default.src
+                   name: default.src
+             Truncated Path -> Alias:
+-              /src [null-subquery1:subq1-subquery1:x]
++              /src [subq1-subquery1:x]
+         Map 3 
+             Map Operator Tree:
+                 TableScan
+@@ -283,7 +283,7 @@ STAGE PLANS:
+                     name: default.src
+                   name: default.src
+             Truncated Path -> Alias:
+-              /src [null-subquery2:subq1-subquery2:x1]
++              /src [subq1-subquery2:x1]
+         Map 4 
+             Map Operator Tree:
+                 TableScan
+diff --git a/ql/src/test/results/clientpositive/spark/join35.q.out b/ql/src/test/results/clientpositive/spark/join35.q.out
+index 8d11727..ed55f9e 100644
+--- a/ql/src/test/results/clientpositive/spark/join35.q.out
++++ b/ql/src/test/results/clientpositive/spark/join35.q.out
+@@ -224,7 +224,7 @@ STAGE PLANS:
+                     name: default.src
+                   name: default.src
+             Truncated Path -> Alias:
+-              /src [null-subquery1:subq1-subquery1:x]
++              /src [subq1-subquery1:x]
+         Map 4 
+             Map Operator Tree:
+                 TableScan
+@@ -297,7 +297,7 @@ STAGE PLANS:
+                     name: default.src
+                   name: default.src
+             Truncated Path -> Alias:
+-              /src [null-subquery2:subq1-subquery2:x1]
++              /src [subq1-subquery2:x1]
+         Map 6 
+             Map Operator Tree:
+                 TableScan
+diff --git a/ql/src/test/results/clientpositive/spark/optimize_nullscan.q.out b/ql/src/test/results/clientpositive/spark/optimize_nullscan.q.out
+index 112569c..b603e93 100644
+--- a/ql/src/test/results/clientpositive/spark/optimize_nullscan.q.out
++++ b/ql/src/test/results/clientpositive/spark/optimize_nullscan.q.out
+@@ -659,7 +659,7 @@ STAGE PLANS:
+                         value expressions: _col0 (type: bigint)
+                         auto parallelism: false
+             Path -> Alias:
+-              -mr-10003default.src{} [null-subquery1:_u1-subquery1:src]
++              -mr-10003default.src{} [_u1-subquery1:src]
+             Path -> Partition:
+               -mr-10003default.src{} 
+                 Partition
+@@ -705,7 +705,7 @@ STAGE PLANS:
+                     name: default.src
+                   name: default.src
+             Truncated Path -> Alias:
+-              -mr-10003default.src{} [null-subquery1:_u1-subquery1:src]
++              -mr-10003default.src{} [_u1-subquery1:src]
+         Map 3 
+             Map Operator Tree:
+                 TableScan
+@@ -915,10 +915,10 @@ STAGE PLANS:
+                     name: default.srcpart
+                   name: default.srcpart
+             Truncated Path -> Alias:
+-              /srcpart/ds=2008-04-08/hr=11 [null-subquery2:_u1-subquery2:srcpart]
+-              /srcpart/ds=2008-04-08/hr=12 [null-subquery2:_u1-subquery2:srcpart]
+-              /srcpart/ds=2008-04-09/hr=11 [null-subquery2:_u1-subquery2:srcpart]
+-              /srcpart/ds=2008-04-09/hr=12 [null-subquery2:_u1-subquery2:srcpart]
++              /srcpart/ds=2008-04-08/hr=11 [_u1-subquery2:srcpart]
++              /srcpart/ds=2008-04-08/hr=12 [_u1-subquery2:srcpart]
++              /srcpart/ds=2008-04-09/hr=11 [_u1-subquery2:srcpart]
++              /srcpart/ds=2008-04-09/hr=12 [_u1-subquery2:srcpart]
+         Reducer 2 
+             Needs Tagging: false
+             Reduce Operator Tree:
+@@ -1582,7 +1582,7 @@ STAGE PLANS:
+                     name: default.src
+                   name: default.src
+             Truncated Path -> Alias:
+-              /src [null-subquery1:a-subquery1:src]
++              /src [a-subquery1:src]
+         Map 2 
+             Map Operator Tree:
+                 TableScan
+@@ -1601,7 +1601,7 @@ STAGE PLANS:
+                       tag: 0
+                       auto parallelism: false
+             Path -> Alias:
+-              -mr-10003default.src{} [null-subquery2:a-subquery2:src]
++              -mr-10003default.src{} [a-subquery2:src]
+             Path -> Partition:
+               -mr-10003default.src{} 
+                 Partition
+@@ -1647,7 +1647,7 @@ STAGE PLANS:
+                     name: default.src
+                   name: default.src
+             Truncated Path -> Alias:
+-              -mr-10003default.src{} [null-subquery2:a-subquery2:src]
++              -mr-10003default.src{} [a-subquery2:src]
+         Map 4 
+         Reducer 3 
+             Needs Tagging: true
+diff --git a/ql/src/test/results/clientpositive/spark/union22.q.out b/ql/src/test/results/clientpositive/spark/union22.q.out
+index 248c149..5ef568b 100644
+--- a/ql/src/test/results/clientpositive/spark/union22.q.out
++++ b/ql/src/test/results/clientpositive/spark/union22.q.out
+@@ -296,7 +296,7 @@ STAGE PLANS:
+                     name: default.dst_union22_delta
+                   name: default.dst_union22_delta
+             Truncated Path -> Alias:
+-              /dst_union22_delta/ds=1 [null-subquery2:subq-subquery2:b:dst_union22_delta]
++              /dst_union22_delta/ds=1 [subq-subquery2:b:dst_union22_delta]
+ 
+   Stage: Stage-1
+     Spark
+@@ -394,7 +394,7 @@ STAGE PLANS:
+                     name: default.dst_union22_delta
+                   name: default.dst_union22_delta
+             Truncated Path -> Alias:
+-              /dst_union22_delta/ds=1 [null-subquery1:subq-subquery1:dst_union22_delta]
++              /dst_union22_delta/ds=1 [subq-subquery1:dst_union22_delta]
+         Map 3 
+             Map Operator Tree:
+                 TableScan
+@@ -505,7 +505,7 @@ STAGE PLANS:
+                     name: default.dst_union22
+                   name: default.dst_union22
+             Truncated Path -> Alias:
+-              /dst_union22/ds=1 [null-subquery2:subq-subquery2:a]
++              /dst_union22/ds=1 [subq-subquery2:a]
+ 
+   Stage: Stage-0
+     Move Operator
+diff --git a/ql/src/test/results/clientpositive/spark/union24.q.out b/ql/src/test/results/clientpositive/spark/union24.q.out
+index 255ff3b..963bc36 100644
+--- a/ql/src/test/results/clientpositive/spark/union24.q.out
++++ b/ql/src/test/results/clientpositive/spark/union24.q.out
+@@ -269,7 +269,7 @@ STAGE PLANS:
+                     name: default.src2
+                   name: default.src2
+             Truncated Path -> Alias:
+-              /src2 [null-subquery1-subquery1-subquery1:s-subquery1-subquery1-subquery1:src2]
++              /src2 [s-subquery1-subquery1-subquery1:src2]
+         Map 2 
+             Map Operator Tree:
+                 TableScan
+@@ -353,7 +353,7 @@ STAGE PLANS:
+                     name: default.src3
+                   name: default.src3
+             Truncated Path -> Alias:
+-              /src3 [null-subquery1-subquery1-subquery2:s-subquery1-subquery1-subquery2:src3]
++              /src3 [s-subquery1-subquery1-subquery2:src3]
+         Map 3 
+             Map Operator Tree:
+                 TableScan
+@@ -437,7 +437,7 @@ STAGE PLANS:
+                     name: default.src4
+                   name: default.src4
+             Truncated Path -> Alias:
+-              /src4 [null-subquery1-subquery2:s-subquery1-subquery2:src4]
++              /src4 [s-subquery1-subquery2:src4]
+         Map 4 
+             Map Operator Tree:
+                 TableScan
+@@ -510,7 +510,7 @@ STAGE PLANS:
+                     name: default.src5
+                   name: default.src5
+             Truncated Path -> Alias:
+-              /src5 [null-subquery2:s-subquery2:src5]
++              /src5 [s-subquery2:src5]
+         Reducer 5 
+             Needs Tagging: false
+             Reduce Operator Tree:
+@@ -825,7 +825,7 @@ STAGE PLANS:
+                     name: default.src2
+                   name: default.src2
+             Truncated Path -> Alias:
+-              /src2 [null-subquery1-subquery1:s-subquery1-subquery1:src2]
++              /src2 [s-subquery1-subquery1:src2]
+         Map 2 
+             Map Operator Tree:
+                 TableScan
+@@ -909,7 +909,7 @@ STAGE PLANS:
+                     name: default.src3
+                   name: default.src3
+             Truncated Path -> Alias:
+-              /src3 [null-subquery1-subquery2:s-subquery1-subquery2:src3]
++              /src3 [s-subquery1-subquery2:src3]
+         Map 3 
+             Map Operator Tree:
+                 TableScan
+@@ -975,7 +975,7 @@ STAGE PLANS:
+                     name: default.src4
+                   name: default.src4
+             Truncated Path -> Alias:
+-              /src4 [null-subquery2:s-subquery2:a]
++              /src4 [s-subquery2:a]
+         Map 5 
+             Map Operator Tree:
+                 TableScan
+@@ -1042,7 +1042,7 @@ STAGE PLANS:
+                     name: default.src5
+                   name: default.src5
+             Truncated Path -> Alias:
+-              /src5 [null-subquery2:s-subquery2:b]
++              /src5 [s-subquery2:b]
+         Reducer 4 
+             Needs Tagging: true
+             Reduce Operator Tree:
+@@ -1355,7 +1355,7 @@ STAGE PLANS:
+                     name: default.src2
+                   name: default.src2
+             Truncated Path -> Alias:
+-              /src2 [null-subquery1-subquery1:s-subquery1-subquery1:src2]
++              /src2 [s-subquery1-subquery1:src2]
+         Map 2 
+             Map Operator Tree:
+                 TableScan
+@@ -1439,7 +1439,7 @@ STAGE PLANS:
+                     name: default.src3
+                   name: default.src3
+             Truncated Path -> Alias:
+-              /src3 [null-subquery1-subquery2:s-subquery1-subquery2:src3]
++              /src3 [s-subquery1-subquery2:src3]
+         Map 3 
+             Map Operator Tree:
+                 TableScan
+@@ -1505,7 +1505,7 @@ STAGE PLANS:
+                     name: default.src4
+                   name: default.src4
+             Truncated Path -> Alias:
+-              /src4 [null-subquery2:s-subquery2:a]
++              /src4 [s-subquery2:a]
+         Map 6 
+             Map Operator Tree:
+                 TableScan
+@@ -1571,7 +1571,7 @@ STAGE PLANS:
+                     name: default.src5
+                   name: default.src5
+             Truncated Path -> Alias:
+-              /src5 [null-subquery2:s-subquery2:b]
++              /src5 [s-subquery2:b]
+         Reducer 4 
+             Needs Tagging: true
+             Reduce Operator Tree:
+diff --git a/ql/src/test/results/clientpositive/spark/union_ppr.q.out b/ql/src/test/results/clientpositive/spark/union_ppr.q.out
+index 4209c67..5243544 100644
+--- a/ql/src/test/results/clientpositive/spark/union_ppr.q.out
++++ b/ql/src/test/results/clientpositive/spark/union_ppr.q.out
+@@ -235,8 +235,8 @@ STAGE PLANS:
+                     name: default.srcpart
+                   name: default.srcpart
+             Truncated Path -> Alias:
+-              /srcpart/ds=2008-04-08/hr=11 [null-subquery1:a-subquery1:x]
+-              /srcpart/ds=2008-04-08/hr=12 [null-subquery1:a-subquery1:x]
++              /srcpart/ds=2008-04-08/hr=11 [a-subquery1:x]
++              /srcpart/ds=2008-04-08/hr=12 [a-subquery1:x]
+         Map 3 
+             Map Operator Tree:
+                 TableScan
+@@ -357,8 +357,8 @@ STAGE PLANS:
+                     name: default.srcpart
+                   name: default.srcpart
+             Truncated Path -> Alias:
+-              /srcpart/ds=2008-04-08/hr=11 [null-subquery2:a-subquery2:y]
+-              /srcpart/ds=2008-04-08/hr=12 [null-subquery2:a-subquery2:y]
++              /srcpart/ds=2008-04-08/hr=11 [a-subquery2:y]
++              /srcpart/ds=2008-04-08/hr=12 [a-subquery2:y]
+         Reducer 2 
+             Needs Tagging: false
+             Reduce Operator Tree:
+diff --git a/ql/src/test/results/clientpositive/union22.q.out b/ql/src/test/results/clientpositive/union22.q.out
+index 409101a..10dec80 100644
+--- a/ql/src/test/results/clientpositive/union22.q.out
++++ b/ql/src/test/results/clientpositive/union22.q.out
+@@ -226,7 +226,7 @@ STAGE PLANS:
+   Stage: Stage-8
+     Map Reduce Local Work
+       Alias -> Map Local Tables:
+-        null-subquery2:subq-subquery2:b:dst_union22_delta 
++        subq-subquery2:b:dst_union22_delta 
+           Fetch Operator
+             limit: -1
+             Partition Description:
+@@ -275,7 +275,7 @@ STAGE PLANS:
+                     name: default.dst_union22_delta
+                   name: default.dst_union22_delta
+       Alias -> Map Local Operator Tree:
+-        null-subquery2:subq-subquery2:b:dst_union22_delta 
++        subq-subquery2:b:dst_union22_delta 
+           TableScan
+             alias: dst_union22_delta
+             Statistics: Num rows: 500 Data size: 16936 Basic stats: COMPLETE Column stats: NONE
+@@ -441,7 +441,7 @@ STAGE PLANS:
+               name: default.dst_union22_delta
+             name: default.dst_union22_delta
+       Truncated Path -> Alias:
+-        /dst_union22/ds=1 [null-subquery2:subq-subquery2:a]
++        /dst_union22/ds=1 [subq-subquery2:a]
+ 
+   Stage: Stage-2
+     Map Reduce
+@@ -591,7 +591,7 @@ STAGE PLANS:
+               name: default.dst_union22_delta
+             name: default.dst_union22_delta
+       Truncated Path -> Alias:
+-        /dst_union22_delta/ds=1 [null-subquery1:subq-subquery1:dst_union22_delta]
++        /dst_union22_delta/ds=1 [subq-subquery1:dst_union22_delta]
+ #### A masked pattern was here ####
+ 
+   Stage: Stage-0
+@@ -757,8 +757,8 @@ STAGE PLANS:
+               name: default.dst_union22_delta
+             name: default.dst_union22_delta
+       Truncated Path -> Alias:
+-        /dst_union22/ds=1 [null-subquery2:subq-subquery2:a]
+-        /dst_union22_delta/ds=1 [null-subquery2:subq-subquery2:b:dst_union22_delta]
++        /dst_union22/ds=1 [subq-subquery2:a]
++        /dst_union22_delta/ds=1 [subq-subquery2:b:dst_union22_delta]
+       Needs Tagging: true
+       Reduce Operator Tree:
+         Join Operator
+diff --git a/ql/src/test/results/clientpositive/union24.q.out b/ql/src/test/results/clientpositive/union24.q.out
+index 0614ac7..1744528 100644
+--- a/ql/src/test/results/clientpositive/union24.q.out
++++ b/ql/src/test/results/clientpositive/union24.q.out
+@@ -258,7 +258,7 @@ STAGE PLANS:
+               name: default.src5
+             name: default.src5
+       Truncated Path -> Alias:
+-        /src5 [null-subquery2:$hdt$_0-subquery2:$hdt$_0:$hdt$_0:src5]
++        /src5 [$hdt$_0-subquery2:$hdt$_0:$hdt$_0:src5]
+       Needs Tagging: false
+       Reduce Operator Tree:
+         Group By Operator
+@@ -574,9 +574,9 @@ STAGE PLANS:
+               name: default.src4
+             name: default.src4
+       Truncated Path -> Alias:
+-        /src2 [null-subquery1:$hdt$_0-subquery1-subquery1:$hdt$_0-subquery1-subquery1:$hdt$_0-subquery1:src2]
+-        /src3 [null-subquery1:$hdt$_0-subquery1-subquery1:$hdt$_0-subquery1-subquery2:$hdt$_0-subquery2:src3]
+-        /src4 [null-subquery1:$hdt$_0-subquery1-subquery2:$hdt$_0-subquery2:src4]
++        /src2 [$hdt$_0-subquery1:$hdt$_0-subquery1:$hdt$_0-subquery1:src2]
++        /src3 [$hdt$_0-subquery1:$hdt$_0-subquery1:$hdt$_0-subquery2:src3]
++        /src4 [$hdt$_0-subquery1:$hdt$_0-subquery2:src4]
+ #### A masked pattern was here ####
+ 
+   Stage: Stage-0
+@@ -900,8 +900,8 @@ STAGE PLANS:
+               name: default.src5
+             name: default.src5
+       Truncated Path -> Alias:
+-        /src4 [null-subquery2:s-subquery2:a]
+-        /src5 [null-subquery2:s-subquery2:b]
++        /src4 [s-subquery2:a]
++        /src5 [s-subquery2:b]
+       Needs Tagging: true
+       Reduce Operator Tree:
+         Join Operator
+@@ -1144,8 +1144,8 @@ STAGE PLANS:
+               name: default.src3
+             name: default.src3
+       Truncated Path -> Alias:
+-        /src2 [null-subquery1-subquery1:s-subquery1-subquery1:src2]
+-        /src3 [null-subquery1-subquery2:s-subquery1-subquery2:src3]
++        /src2 [s-subquery1-subquery1:src2]
++        /src3 [s-subquery1-subquery2:src3]
+ #### A masked pattern was here ####
+ 
+   Stage: Stage-0
+@@ -1463,8 +1463,8 @@ STAGE PLANS:
+               name: default.src5
+             name: default.src5
+       Truncated Path -> Alias:
+-        /src4 [null-subquery2:s-subquery2:a]
+-        /src5 [null-subquery2:s-subquery2:b]
++        /src4 [s-subquery2:a]
++        /src5 [s-subquery2:b]
+       Needs Tagging: true
+       Reduce Operator Tree:
+         Join Operator
+@@ -1773,8 +1773,8 @@ STAGE PLANS:
+               name: default.src3
+             name: default.src3
+       Truncated Path -> Alias:
+-        /src2 [null-subquery1-subquery1:s-subquery1-subquery1:src2]
+-        /src3 [null-subquery1-subquery2:s-subquery1-subquery2:src3]
++        /src2 [s-subquery1-subquery1:src2]
++        /src3 [s-subquery1-subquery2:src3]
+ #### A masked pattern was here ####
+ 
+   Stage: Stage-0
+diff --git a/ql/src/test/results/clientpositive/union34.q.out b/ql/src/test/results/clientpositive/union34.q.out
+index 68a8e5f..a453498 100644
+--- a/ql/src/test/results/clientpositive/union34.q.out
++++ b/ql/src/test/results/clientpositive/union34.q.out
+@@ -83,11 +83,11 @@ STAGE PLANS:
+   Stage: Stage-7
+     Map Reduce Local Work
+       Alias -> Map Local Tables:
+-        null-subquery1:alias1-subquery1:sub1:src10_1 
++        alias1-subquery1:sub1:src10_1 
+           Fetch Operator
+             limit: -1
+       Alias -> Map Local Operator Tree:
+-        null-subquery1:alias1-subquery1:sub1:src10_1 
++        alias1-subquery1:sub1:src10_1 
+           TableScan
+             alias: src10_1
+             Statistics: Num rows: 10 Data size: 104 Basic stats: COMPLETE Column stats: NONE
+diff --git a/ql/src/test/results/clientpositive/union38.q.out b/ql/src/test/results/clientpositive/union38.q.out
+new file mode 100644
+index 0000000..2324379
+--- /dev/null
++++ b/ql/src/test/results/clientpositive/union38.q.out
+@@ -0,0 +1,198 @@
++PREHOOK: query: create table union38_test1( name String, id int, address String)
++PREHOOK: type: CREATETABLE
++PREHOOK: Output: database:default
++PREHOOK: Output: default@union38_test1
++POSTHOOK: query: create table union38_test1( name String, id int, address String)
++POSTHOOK: type: CREATETABLE
++POSTHOOK: Output: database:default
++POSTHOOK: Output: default@union38_test1
++PREHOOK: query: insert into union38_test1 values("Young", 1, "Sydney"), ("Jin", 2, "Mel")
++PREHOOK: type: QUERY
++PREHOOK: Output: default@union38_test1
++POSTHOOK: query: insert into union38_test1 values("Young", 1, "Sydney"), ("Jin", 2, "Mel")
++POSTHOOK: type: QUERY
++POSTHOOK: Output: default@union38_test1
++POSTHOOK: Lineage: union38_test1.address SIMPLE [(values__tmp__table__1)values__tmp__table__1.FieldSchema(name:tmp_values_col3, type:string, comment:), ]
++POSTHOOK: Lineage: union38_test1.id EXPRESSION [(values__tmp__table__1)values__tmp__table__1.FieldSchema(name:tmp_values_col2, type:string, comment:), ]
++POSTHOOK: Lineage: union38_test1.name SIMPLE [(values__tmp__table__1)values__tmp__table__1.FieldSchema(name:tmp_values_col1, type:string, comment:), ]
++PREHOOK: query: analyze table union38_test1 compute statistics for columns
++PREHOOK: type: QUERY
++PREHOOK: Input: default@union38_test1
++#### A masked pattern was here ####
++POSTHOOK: query: analyze table union38_test1 compute statistics for columns
++POSTHOOK: type: QUERY
++POSTHOOK: Input: default@union38_test1
++#### A masked pattern was here ####
++PREHOOK: query: create view union38_test1_view as select * from union38_test1
++PREHOOK: type: CREATEVIEW
++PREHOOK: Input: default@union38_test1
++PREHOOK: Output: database:default
++PREHOOK: Output: default@union38_test1_view
++POSTHOOK: query: create view union38_test1_view as select * from union38_test1
++POSTHOOK: type: CREATEVIEW
++POSTHOOK: Input: default@union38_test1
++POSTHOOK: Output: database:default
++POSTHOOK: Output: default@union38_test1_view
++PREHOOK: query: select * from union38_test1_view
++PREHOOK: type: QUERY
++PREHOOK: Input: default@union38_test1
++PREHOOK: Input: default@union38_test1_view
++#### A masked pattern was here ####
++POSTHOOK: query: select * from union38_test1_view
++POSTHOOK: type: QUERY
++POSTHOOK: Input: default@union38_test1
++POSTHOOK: Input: default@union38_test1_view
++#### A masked pattern was here ####
++Young	1	Sydney
++Jin	2	Mel
++PREHOOK: query: create table union38_test2( name String, id int, address String)
++PREHOOK: type: CREATETABLE
++PREHOOK: Output: database:default
++PREHOOK: Output: default@union38_test2
++POSTHOOK: query: create table union38_test2( name String, id int, address String)
++POSTHOOK: type: CREATETABLE
++POSTHOOK: Output: database:default
++POSTHOOK: Output: default@union38_test2
++PREHOOK: query: insert into union38_test2 values("Eun", 3, "Bri"), ("Kim", 4, "Ad")
++PREHOOK: type: QUERY
++PREHOOK: Output: default@union38_test2
++POSTHOOK: query: insert into union38_test2 values("Eun", 3, "Bri"), ("Kim", 4, "Ad")
++POSTHOOK: type: QUERY
++POSTHOOK: Output: default@union38_test2
++POSTHOOK: Lineage: union38_test2.address SIMPLE [(values__tmp__table__2)values__tmp__table__2.FieldSchema(name:tmp_values_col3, type:string, comment:), ]
++POSTHOOK: Lineage: union38_test2.id EXPRESSION [(values__tmp__table__2)values__tmp__table__2.FieldSchema(name:tmp_values_col2, type:string, comment:), ]
++POSTHOOK: Lineage: union38_test2.name SIMPLE [(values__tmp__table__2)values__tmp__table__2.FieldSchema(name:tmp_values_col1, type:string, comment:), ]
++PREHOOK: query: create view union38_test2_view as select * from union38_test2
++PREHOOK: type: CREATEVIEW
++PREHOOK: Input: default@union38_test2
++PREHOOK: Output: database:default
++PREHOOK: Output: default@union38_test2_view
++POSTHOOK: query: create view union38_test2_view as select * from union38_test2
++POSTHOOK: type: CREATEVIEW
++POSTHOOK: Input: default@union38_test2
++POSTHOOK: Output: database:default
++POSTHOOK: Output: default@union38_test2_view
++PREHOOK: query: select * from union38_test2_view
++PREHOOK: type: QUERY
++PREHOOK: Input: default@union38_test2
++PREHOOK: Input: default@union38_test2_view
++#### A masked pattern was here ####
++POSTHOOK: query: select * from union38_test2_view
++POSTHOOK: type: QUERY
++POSTHOOK: Input: default@union38_test2
++POSTHOOK: Input: default@union38_test2_view
++#### A masked pattern was here ####
++Eun	3	Bri
++Kim	4	Ad
++PREHOOK: query: select * from union38_test1 union all select * from union38_test2
++PREHOOK: type: QUERY
++PREHOOK: Input: default@union38_test1
++PREHOOK: Input: default@union38_test2
++#### A masked pattern was here ####
++POSTHOOK: query: select * from union38_test1 union all select * from union38_test2
++POSTHOOK: type: QUERY
++POSTHOOK: Input: default@union38_test1
++POSTHOOK: Input: default@union38_test2
++#### A masked pattern was here ####
++Young	1	Sydney
++Jin	2	Mel
++Eun	3	Bri
++Kim	4	Ad
++PREHOOK: query: select * from union38_test1_view union all select * from union38_test2_view
++PREHOOK: type: QUERY
++PREHOOK: Input: default@union38_test1
++PREHOOK: Input: default@union38_test1_view
++PREHOOK: Input: default@union38_test2
++PREHOOK: Input: default@union38_test2_view
++#### A masked pattern was here ####
++POSTHOOK: query: select * from union38_test1_view union all select * from union38_test2_view
++POSTHOOK: type: QUERY
++POSTHOOK: Input: default@union38_test1
++POSTHOOK: Input: default@union38_test1_view
++POSTHOOK: Input: default@union38_test2
++POSTHOOK: Input: default@union38_test2_view
++#### A masked pattern was here ####
++Young	1	Sydney
++Jin	2	Mel
++Eun	3	Bri
++Kim	4	Ad
++PREHOOK: query: create view union38_test_view1 as select * from union38_test1 union all select * from union38_test2
++PREHOOK: type: CREATEVIEW
++PREHOOK: Input: default@union38_test1
++PREHOOK: Input: default@union38_test2
++PREHOOK: Output: database:default
++PREHOOK: Output: default@union38_test_view1
++POSTHOOK: query: create view union38_test_view1 as select * from union38_test1 union all select * from union38_test2
++POSTHOOK: type: CREATEVIEW
++POSTHOOK: Input: default@union38_test1
++POSTHOOK: Input: default@union38_test2
++POSTHOOK: Output: database:default
++POSTHOOK: Output: default@union38_test_view1
++PREHOOK: query: select * from union38_test_view1
++PREHOOK: type: QUERY
++PREHOOK: Input: default@union38_test1
++PREHOOK: Input: default@union38_test2
++PREHOOK: Input: default@union38_test_view1
++#### A masked pattern was here ####
++POSTHOOK: query: select * from union38_test_view1
++POSTHOOK: type: QUERY
++POSTHOOK: Input: default@union38_test1
++POSTHOOK: Input: default@union38_test2
++POSTHOOK: Input: default@union38_test_view1
++#### A masked pattern was here ####
++Young	1	Sydney
++Jin	2	Mel
++Eun	3	Bri
++Kim	4	Ad
++PREHOOK: query: create view union38_test_view3 as with union38_tmp_1 as ( select * from union38_test1 ), union38_tmp_2 as (select * from union38_test2 ) select * from union38_tmp_1 union all select * from union38_tmp_2
++PREHOOK: type: CREATEVIEW
++PREHOOK: Input: default@union38_test1
++PREHOOK: Input: default@union38_test2
++PREHOOK: Output: database:default
++PREHOOK: Output: default@union38_test_view3
++POSTHOOK: query: create view union38_test_view3 as with union38_tmp_1 as ( select * from union38_test1 ), union38_tmp_2 as (select * from union38_test2 ) select * from union38_tmp_1 union all select * from union38_tmp_2
++POSTHOOK: type: CREATEVIEW
++POSTHOOK: Input: default@union38_test1
++POSTHOOK: Input: default@union38_test2
++POSTHOOK: Output: database:default
++POSTHOOK: Output: default@union38_test_view3
++PREHOOK: query: select * from union38_test_view3
++PREHOOK: type: QUERY
++PREHOOK: Input: default@union38_test1
++PREHOOK: Input: default@union38_test2
++PREHOOK: Input: default@union38_test_view3
++#### A masked pattern was here ####
++POSTHOOK: query: select * from union38_test_view3
++POSTHOOK: type: QUERY
++POSTHOOK: Input: default@union38_test1
++POSTHOOK: Input: default@union38_test2
++POSTHOOK: Input: default@union38_test_view3
++#### A masked pattern was here ####
++Young	1	Sydney
++Jin	2	Mel
++Eun	3	Bri
++Kim	4	Ad
++PREHOOK: query: create table union38_test_table1 as with union38_tmp_1 as ( select * from union38_test1 ), union38_tmp_2 as (select * from union38_test2 ) select * from union38_tmp_1 union all select * from union38_tmp_2
++PREHOOK: type: CREATETABLE_AS_SELECT
++PREHOOK: Input: default@union38_test1
++PREHOOK: Input: default@union38_test2
++PREHOOK: Output: database:default
++PREHOOK: Output: default@union38_test_table1
++POSTHOOK: query: create table union38_test_table1 as with union38_tmp_1 as ( select * from union38_test1 ), union38_tmp_2 as (select * from union38_test2 ) select * from union38_tmp_1 union all select * from union38_tmp_2
++POSTHOOK: type: CREATETABLE_AS_SELECT
++POSTHOOK: Input: default@union38_test1
++POSTHOOK: Input: default@union38_test2
++POSTHOOK: Output: database:default
++POSTHOOK: Output: default@union38_test_table1
++PREHOOK: query: select * from union38_test_table1
++PREHOOK: type: QUERY
++PREHOOK: Input: default@union38_test_table1
++#### A masked pattern was here ####
++POSTHOOK: query: select * from union38_test_table1
++POSTHOOK: type: QUERY
++POSTHOOK: Input: default@union38_test_table1
++#### A masked pattern was here ####
++Young	1	Sydney
++Jin	2	Mel
++Eun	3	Bri
++Kim	4	Ad
+diff --git a/ql/src/test/results/clientpositive/union_ppr.q.out b/ql/src/test/results/clientpositive/union_ppr.q.out
+index ea21d27..6163f1a 100644
+--- a/ql/src/test/results/clientpositive/union_ppr.q.out
++++ b/ql/src/test/results/clientpositive/union_ppr.q.out
+@@ -256,8 +256,8 @@ STAGE PLANS:
+               name: default.srcpart
+             name: default.srcpart
+       Truncated Path -> Alias:
+-        /srcpart/ds=2008-04-08/hr=11 [null-subquery1:a-subquery1:x, null-subquery2:a-subquery2:y]
+-        /srcpart/ds=2008-04-08/hr=12 [null-subquery1:a-subquery1:x, null-subquery2:a-subquery2:y]
++        /srcpart/ds=2008-04-08/hr=11 [a-subquery1:x, a-subquery2:y]
++        /srcpart/ds=2008-04-08/hr=12 [a-subquery1:x, a-subquery2:y]
+       Needs Tagging: false
+       Reduce Operator Tree:
+         Select Operator
+diff --git a/ql/src/test/results/clientpositive/union_remove_12.q.out b/ql/src/test/results/clientpositive/union_remove_12.q.out
+index 9b63100..101fe0e 100644
+--- a/ql/src/test/results/clientpositive/union_remove_12.q.out
++++ b/ql/src/test/results/clientpositive/union_remove_12.q.out
+@@ -115,11 +115,11 @@ STAGE PLANS:
+   Stage: Stage-10
+     Map Reduce Local Work
+       Alias -> Map Local Tables:
+-        null-subquery2:c-subquery2:a 
++        c-subquery2:a 
+           Fetch Operator
+             limit: -1
+       Alias -> Map Local Operator Tree:
+-        null-subquery2:c-subquery2:a 
++        c-subquery2:a 
+           TableScan
+             alias: a
+             Statistics: Num rows: 1 Data size: 30 Basic stats: COMPLETE Column stats: NONE
+diff --git a/ql/src/test/results/clientpositive/union_remove_13.q.out b/ql/src/test/results/clientpositive/union_remove_13.q.out
+index 743cf07..9a6f5ae 100644
+--- a/ql/src/test/results/clientpositive/union_remove_13.q.out
++++ b/ql/src/test/results/clientpositive/union_remove_13.q.out
+@@ -138,11 +138,11 @@ STAGE PLANS:
+   Stage: Stage-10
+     Map Reduce Local Work
+       Alias -> Map Local Tables:
+-        null-subquery2:c-subquery2:a 
++        c-subquery2:a 
+           Fetch Operator
+             limit: -1
+       Alias -> Map Local Operator Tree:
+-        null-subquery2:c-subquery2:a 
++        c-subquery2:a 
+           TableScan
+             alias: a
+             Statistics: Num rows: 1 Data size: 30 Basic stats: COMPLETE Column stats: NONE
+diff --git a/ql/src/test/results/clientpositive/union_remove_14.q.out b/ql/src/test/results/clientpositive/union_remove_14.q.out
+index 9b63100..101fe0e 100644
+--- a/ql/src/test/results/clientpositive/union_remove_14.q.out
++++ b/ql/src/test/results/clientpositive/union_remove_14.q.out
+@@ -115,11 +115,11 @@ STAGE PLANS:
+   Stage: Stage-10
+     Map Reduce Local Work
+       Alias -> Map Local Tables:
+-        null-subquery2:c-subquery2:a 
++        c-subquery2:a 
+           Fetch Operator
+             limit: -1
+       Alias -> Map Local Operator Tree:
+-        null-subquery2:c-subquery2:a 
++        c-subquery2:a 
+           TableScan
+             alias: a
+             Statistics: Num rows: 1 Data size: 30 Basic stats: COMPLETE Column stats: NONE
+-- 
+1.7.9.5
+

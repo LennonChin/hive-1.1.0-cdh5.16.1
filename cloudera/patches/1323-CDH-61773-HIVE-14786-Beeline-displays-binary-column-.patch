@@ -1,0 +1,367 @@
+From fce3d4edb56711c2e94a64a426b0bb47efa7435b Mon Sep 17 00:00:00 2001
+From: Peter Vary <pvary@cloudera.com>
+Date: Mon, 7 Aug 2017 10:52:06 +0200
+Subject: [PATCH 1323/1431] CDH-61773 HIVE-14786: Beeline displays binary
+ column data as string instead of byte array
+ (Barna Zsombor Klara, via Peter Vary)
+
+Conflicts:
+	beeline/src/java/org/apache/hive/beeline/BeeLineOpts.java
+	beeline/src/main/resources/BeeLine.properties
+	beeline/src/test/org/apache/hive/beeline/TestTableOutputFormat.java
+
+Change-Id: Ieb7aaea892c0ce9c57b3642bba41050a91f121d3
+---
+ .../java/org/apache/hive/beeline/BeeLineOpts.java  |   11 +-
+ beeline/src/java/org/apache/hive/beeline/Rows.java |   21 ++-
+ beeline/src/main/resources/BeeLine.properties      |    1 +
+ .../org/apache/hive/beeline/TestBufferedRows.java  |    2 +-
+ .../apache/hive/beeline/TestIncrementalRows.java   |  136 ++++++++++++++++++++
+ .../TestIncrementalRowsWithNormalization.java      |   90 -------------
+ 6 files changed, 158 insertions(+), 103 deletions(-)
+ create mode 100644 beeline/src/test/org/apache/hive/beeline/TestIncrementalRows.java
+ delete mode 100644 beeline/src/test/org/apache/hive/beeline/TestIncrementalRowsWithNormalization.java
+
+diff --git a/beeline/src/java/org/apache/hive/beeline/BeeLineOpts.java b/beeline/src/java/org/apache/hive/beeline/BeeLineOpts.java
+index e3ff55a..ac55f3f 100644
+--- a/beeline/src/java/org/apache/hive/beeline/BeeLineOpts.java
++++ b/beeline/src/java/org/apache/hive/beeline/BeeLineOpts.java
+@@ -74,7 +74,8 @@
+   private boolean autoCommit = true;
+   private boolean verbose = false;
+   private boolean force = false;
+-  private boolean incremental = false;
++  private boolean incremental = true;
++  private boolean convertBinaryArrayToString = true;
+   private int incrementalBufferRows = DEFAULT_INCREMENTAL_BUFFER_ROWS;
+   private boolean showWarnings = false;
+   private boolean showNestedErrs = false;
+@@ -384,6 +385,14 @@ public String getNumberFormat() {
+     return numberFormat;
+   }
+ 
++  public void setConvertBinaryArrayToString(boolean convert) {
++    this.convertBinaryArrayToString = convert;
++  }
++
++  public boolean getConvertBinaryArrayToString() {
++    return this.convertBinaryArrayToString;
++  }
++
+   public void setMaxWidth(int maxWidth) {
+     this.maxWidth = maxWidth;
+   }
+diff --git a/beeline/src/java/org/apache/hive/beeline/Rows.java b/beeline/src/java/org/apache/hive/beeline/Rows.java
+index 924b951..cd90268 100644
+--- a/beeline/src/java/org/apache/hive/beeline/Rows.java
++++ b/beeline/src/java/org/apache/hive/beeline/Rows.java
+@@ -39,6 +39,7 @@
+   final ResultSetMetaData rsMeta;
+   final Boolean[] primaryKeys;
+   final NumberFormat numberFormat;
++  private boolean convertBinaryArray;
+   private final String nullStr;
+ 
+   Rows(BeeLine beeLine, ResultSet rs) throws SQLException {
+@@ -52,6 +53,7 @@
+     } else {
+       numberFormat = new DecimalFormat(beeLine.getOpts().getNumberFormat());
+     }
++    this.convertBinaryArray = beeLine.getOpts().getConvertBinaryArrayToString();
+   }
+ 
+   public void remove() {
+@@ -153,19 +155,16 @@ public String toString(){
+       }
+ 
+       for (int i = 0; i < size; i++) {
+-        if (numberFormat != null) {
+-          Object o = rs.getObject(i + 1);
+-          if (o == null) {
+-            values[i] = null;
+-          }  else if (o instanceof Number) {
+-            values[i] = numberFormat.format(o);
+-          } else {
+-            values[i] = o.toString();
+-          }
++        Object o = rs.getObject(i + 1);
++        if(rs.wasNull()) {
++          values[i] = nullStr;
++        } else if (o instanceof Number) {
++          values[i] = numberFormat != null ? numberFormat.format(o) : o.toString() ;
++        } else if (o instanceof byte[]) {
++          values[i] = convertBinaryArray ? new String((byte[])o) : Arrays.toString((byte[])o);
+         } else {
+-          values[i] = rs.getString(i + 1);
++          values[i] = o.toString();
+         }
+-        values[i] = values[i] == null ? nullStr : values[i];
+         sizes[i] = values[i].length();
+       }
+     }
+diff --git a/beeline/src/main/resources/BeeLine.properties b/beeline/src/main/resources/BeeLine.properties
+index bcdc69f..1273b81 100644
+--- a/beeline/src/main/resources/BeeLine.properties
++++ b/beeline/src/main/resources/BeeLine.properties
+@@ -191,6 +191,7 @@ cmd-usage: Usage: java org.apache.hive.cli.beeline.BeeLine \n \
+ \  --isolation=LEVEL               set the transaction isolation level\n \
+ \  --nullemptystring=[true/false]  set to true to get historic behavior of printing null as empty string\n \
+ \  --maxHistoryRows=MAXHISTORYROWS The maximum number of rows to store beeline history.\n \
++\  --convertBinaryArrayToString=[true/false]    display binary column data as string or as byte array \n \
+ \  --help                          display this message\n \
+ \n \
+ \  Example:\n \
+diff --git a/beeline/src/test/org/apache/hive/beeline/TestBufferedRows.java b/beeline/src/test/org/apache/hive/beeline/TestBufferedRows.java
+index f3f3d3a..c1ae29b 100644
+--- a/beeline/src/test/org/apache/hive/beeline/TestBufferedRows.java
++++ b/beeline/src/test/org/apache/hive/beeline/TestBufferedRows.java
+@@ -98,7 +98,7 @@ public Boolean answer(InvocationOnMock invocation) {
+       }
+     });
+ 
+-    when(mockResultSet.getString(Matchers.anyInt())).thenAnswer(new Answer<String>() {
++    when(mockResultSet.getObject(Matchers.anyInt())).thenAnswer(new Answer<String>() {
+       public String answer(InvocationOnMock invocation) {
+         Object[] args = invocation.getArguments();
+         int index = ((Integer) args[0]).intValue();
+diff --git a/beeline/src/test/org/apache/hive/beeline/TestIncrementalRows.java b/beeline/src/test/org/apache/hive/beeline/TestIncrementalRows.java
+new file mode 100644
+index 0000000..240c979
+--- /dev/null
++++ b/beeline/src/test/org/apache/hive/beeline/TestIncrementalRows.java
+@@ -0,0 +1,136 @@
++/**
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.hive.beeline;
++
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.times;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.when;
++
++import java.sql.ResultSet;
++import java.sql.ResultSetMetaData;
++import java.sql.SQLException;
++
++import org.junit.Assert;
++import org.junit.Before;
++import org.junit.Test;
++
++import org.mockito.invocation.InvocationOnMock;
++import org.mockito.stubbing.Answer;
++
++
++public class TestIncrementalRows {
++
++  private BeeLineOpts mockBeeLineOpts;
++  private BeeLine mockBeeline;
++  private Integer incrementalBufferRows = 5;
++  private ResultSet mockResultSet;
++
++  @Before
++  public void init() throws SQLException {
++
++    // Mock BeeLineOpts
++    mockBeeLineOpts = mock(BeeLineOpts.class);
++    when(mockBeeLineOpts.getIncrementalBufferRows()).thenReturn(incrementalBufferRows);
++    when(mockBeeLineOpts.getMaxColumnWidth()).thenReturn(BeeLineOpts.DEFAULT_MAX_COLUMN_WIDTH);
++    when(mockBeeLineOpts.getNumberFormat()).thenReturn("default");
++    when(mockBeeLineOpts.getNullString()).thenReturn("NULL");
++
++    // Mock BeeLine
++    mockBeeline = mock(BeeLine.class);
++    when(mockBeeline.getOpts()).thenReturn(mockBeeLineOpts);
++
++    // MockResultSet
++    mockResultSet = mock(ResultSet.class);
++
++    ResultSetMetaData mockResultSetMetaData = mock(ResultSetMetaData.class);
++    when(mockResultSetMetaData.getColumnCount()).thenReturn(1);
++    when(mockResultSetMetaData.getColumnLabel(1)).thenReturn("Mock Table");
++    when(mockResultSet.getMetaData()).thenReturn(mockResultSetMetaData);
++  }
++
++  @Test
++  public void testIncrementalRowsBinaryArrayConvert() throws SQLException {
++
++    when(mockBeeLineOpts.getConvertBinaryArrayToString()).thenReturn(true);
++
++    // First call to resultSet.next() should return true
++    initNrOfResultSetCalls(1);
++
++    when(mockResultSet.getObject(1)).thenReturn(new byte[]{77,77,77});
++    IncrementalRows convertedIr = new IncrementalRows(mockBeeline, mockResultSet);
++
++    convertedIr.next();
++    String row = convertedIr.next().toString();
++    Assert.assertEquals("[MMM]", row);
++  }
++
++  @Test
++  public void testIncrementalRowsBinaryArraySkipConvert() throws SQLException {
++
++    when(mockBeeLineOpts.getConvertBinaryArrayToString()).thenReturn(false);
++
++    // First call to resultSet.next() should return true
++    initNrOfResultSetCalls(1);
++
++    when(mockResultSet.getObject(1)).thenReturn(new byte[]{77,77,77});
++    IncrementalRows convertedIr = new IncrementalRows(mockBeeline, mockResultSet);
++
++    convertedIr.next();
++    String row = convertedIr.next().toString();
++    Assert.assertEquals("[[77, 77, 77]]", row);
++  }
++
++  public void initNrOfResultSetCalls(final int iter) throws SQLException {
++    when(mockResultSet.next()).thenAnswer(new Answer<Boolean>() {
++      private int iterations = iter;
++
++      @Override
++      public Boolean answer(InvocationOnMock invocation) {
++        return this.iterations-- > 0;
++      }
++    });
++  }
++
++  @Test
++  public void testIncrementalRowsWithNormalization() throws SQLException {
++
++    // First 10 calls to resultSet.next() should return true
++    initNrOfResultSetCalls(10);
++
++    when(mockResultSet.getObject(1)).thenReturn("Hello World");
++
++    // IncrementalRows constructor should buffer the first "incrementalBufferRows" rows
++    IncrementalRowsWithNormalization incrementalRowsWithNormalization = new IncrementalRowsWithNormalization(
++        mockBeeline, mockResultSet);
++
++    // When the first buffer is loaded ResultSet.next() should be called "incrementalBufferRows" times
++    verify(mockResultSet, times(5)).next();
++
++    // Iterating through the buffer should not cause the next buffer to be fetched
++    for (int i = 0; i < incrementalBufferRows + 1; i++) {
++      incrementalRowsWithNormalization.next();
++    }
++    verify(mockResultSet, times(5)).next();
++
++    // When a new buffer is fetched ResultSet.next() should be called "incrementalBufferRows" more times
++    incrementalRowsWithNormalization.next();
++    verify(mockResultSet, times(10)).next();
++  }
++}
+diff --git a/beeline/src/test/org/apache/hive/beeline/TestIncrementalRowsWithNormalization.java b/beeline/src/test/org/apache/hive/beeline/TestIncrementalRowsWithNormalization.java
+deleted file mode 100644
+index 68da841..0000000
+--- a/beeline/src/test/org/apache/hive/beeline/TestIncrementalRowsWithNormalization.java
++++ /dev/null
+@@ -1,90 +0,0 @@
+-/**
+- * Licensed to the Apache Software Foundation (ASF) under one
+- * or more contributor license agreements.  See the NOTICE file
+- * distributed with this work for additional information
+- * regarding copyright ownership.  The ASF licenses this file
+- * to you under the Apache License, Version 2.0 (the
+- * "License"); you may not use this file except in compliance
+- * with the License.  You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package org.apache.hive.beeline;
+-
+-import static org.mockito.Mockito.mock;
+-import static org.mockito.Mockito.times;
+-import static org.mockito.Mockito.verify;
+-import static org.mockito.Mockito.when;
+-
+-import java.sql.ResultSet;
+-import java.sql.ResultSetMetaData;
+-import java.sql.SQLException;
+-
+-import org.junit.Test;
+-
+-import org.mockito.invocation.InvocationOnMock;
+-import org.mockito.stubbing.Answer;
+-
+-
+-public class TestIncrementalRowsWithNormalization {
+-
+-  @Test
+-  public void testIncrementalRows() throws SQLException {
+-    Integer incrementalBufferRows = 5;
+-
+-    // Mock BeeLineOpts
+-    BeeLineOpts mockBeeLineOpts = mock(BeeLineOpts.class);
+-    when(mockBeeLineOpts.getIncrementalBufferRows()).thenReturn(incrementalBufferRows);
+-    when(mockBeeLineOpts.getMaxColumnWidth()).thenReturn(BeeLineOpts.DEFAULT_MAX_COLUMN_WIDTH);
+-    when(mockBeeLineOpts.getNumberFormat()).thenReturn("default");
+-    when(mockBeeLineOpts.getNullString()).thenReturn("NULL");
+-
+-    // Mock BeeLine
+-    BeeLine mockBeeline = mock(BeeLine.class);
+-    when(mockBeeline.getOpts()).thenReturn(mockBeeLineOpts);
+-
+-    // MockResultSet
+-    ResultSet mockResultSet = mock(ResultSet.class);
+-
+-    ResultSetMetaData mockResultSetMetaData = mock(ResultSetMetaData.class);
+-    when(mockResultSetMetaData.getColumnCount()).thenReturn(1);
+-    when(mockResultSetMetaData.getColumnLabel(1)).thenReturn("Mock Table");
+-    when(mockResultSet.getMetaData()).thenReturn(mockResultSetMetaData);
+-
+-    // First 10 calls to resultSet.next() should return true
+-    when(mockResultSet.next()).thenAnswer(new Answer<Boolean>() {
+-      private int iterations = 10;
+-
+-      @Override
+-      public Boolean answer(InvocationOnMock invocation) {
+-        return this.iterations-- > 0;
+-      }
+-    });
+-
+-    when(mockResultSet.getString(1)).thenReturn("Hello World");
+-
+-    // IncrementalRows constructor should buffer the first "incrementalBufferRows" rows
+-    IncrementalRowsWithNormalization incrementalRowsWithNormalization = new IncrementalRowsWithNormalization(
+-            mockBeeline, mockResultSet);
+-
+-    // When the first buffer is loaded ResultSet.next() should be called "incrementalBufferRows" times
+-    verify(mockResultSet, times(5)).next();
+-
+-    // Iterating through the buffer should not cause the next buffer to be fetched
+-    for (int i = 0; i < incrementalBufferRows + 1; i++) {
+-      incrementalRowsWithNormalization.next();
+-    }
+-    verify(mockResultSet, times(5)).next();
+-
+-    // When a new buffer is fetched ResultSet.next() should be called "incrementalBufferRows" more times
+-    incrementalRowsWithNormalization.next();
+-    verify(mockResultSet, times(10)).next();
+-  }
+-}
+-- 
+1.7.9.5
+

@@ -1,0 +1,117 @@
+From e584b4df9377333baa3d4ecfd118e79f9c0173e5 Mon Sep 17 00:00:00 2001
+From: Aihua Xu <aihuaxu@apache.org>
+Date: Mon, 15 May 2017 16:08:50 -0400
+Subject: [PATCH 1358/1431] CDH-63964: HIVE-16324: Truncate table should not
+ work when EXTERNAL property of table is true
+ (Vihang Karajgaonkar via Aihua Xu, reviewed by
+ Thejas M Nair)
+
+(cherry picked from commit 7d4554dd1def433e0439cdbe7dfa665b6909e706)
+
+Change-Id: Ib324b37de2978a861d765ae99c5713eeaf4085ca
+(cherry picked from commit 4770fcbf017e4e4f9b72b1a56a1d3d5465bbf00d)
+---
+ .../apache/hadoop/hive/metastore/ObjectStore.java  |    4 ++--
+ .../clientnegative/truncate_table_failure5.q       |    5 +++++
+ .../clientnegative/truncate_table_failure6.q       |    5 +++++
+ .../clientnegative/truncate_table_failure5.q.out   |   17 +++++++++++++++++
+ .../clientnegative/truncate_table_failure6.q.out   |   17 +++++++++++++++++
+ 5 files changed, 46 insertions(+), 2 deletions(-)
+ create mode 100644 ql/src/test/queries/clientnegative/truncate_table_failure5.q
+ create mode 100644 ql/src/test/queries/clientnegative/truncate_table_failure6.q
+ create mode 100644 ql/src/test/results/clientnegative/truncate_table_failure5.q.out
+ create mode 100644 ql/src/test/results/clientnegative/truncate_table_failure6.q.out
+
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/ObjectStore.java b/metastore/src/java/org/apache/hadoop/hive/metastore/ObjectStore.java
+index c712f17..31f873e 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/ObjectStore.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/ObjectStore.java
+@@ -1283,7 +1283,7 @@ private Table convertToTable(MTable mtbl) throws MetaException {
+       // for backwards compatibility with old metastore persistence
+       if (mtbl.getViewOriginalText() != null) {
+         tableType = TableType.VIRTUAL_VIEW.toString();
+-      } else if ("TRUE".equals(mtbl.getParameters().get("EXTERNAL"))) {
++      } else if (Boolean.parseBoolean(mtbl.getParameters().get("EXTERNAL"))) {
+         tableType = TableType.EXTERNAL_TABLE.toString();
+       } else {
+         tableType = TableType.MANAGED_TABLE.toString();
+@@ -1313,7 +1313,7 @@ private MTable convertToMTable(Table tbl) throws InvalidObjectException,
+     // If the table has property EXTERNAL set, update table type
+     // accordingly
+     String tableType = tbl.getTableType();
+-    boolean isExternal = "TRUE".equals(tbl.getParameters().get("EXTERNAL"));
++    boolean isExternal = Boolean.parseBoolean(tbl.getParameters().get("EXTERNAL"));
+     if (TableType.MANAGED_TABLE.toString().equals(tableType)) {
+       if (isExternal) {
+         tableType = TableType.EXTERNAL_TABLE.toString();
+diff --git a/ql/src/test/queries/clientnegative/truncate_table_failure5.q b/ql/src/test/queries/clientnegative/truncate_table_failure5.q
+new file mode 100644
+index 0000000..efabb34
+--- /dev/null
++++ b/ql/src/test/queries/clientnegative/truncate_table_failure5.q
+@@ -0,0 +1,5 @@
++create table external1 (col1 int, col2 string);
++alter table external1 set tblproperties ('EXTERNAL'='true');
++
++-- truncate on a non-managed table should throw exception
++truncate table external1;
+diff --git a/ql/src/test/queries/clientnegative/truncate_table_failure6.q b/ql/src/test/queries/clientnegative/truncate_table_failure6.q
+new file mode 100644
+index 0000000..b73ec63
+--- /dev/null
++++ b/ql/src/test/queries/clientnegative/truncate_table_failure6.q
+@@ -0,0 +1,5 @@
++create table external1 (col1 int, col2 string);
++alter table external1 set tblproperties ('EXTERNAL'='TRUE');
++
++-- truncate on external table should throw exception. Property value of 'EXTERNAL' is not case sensitive
++truncate table external1;
+diff --git a/ql/src/test/results/clientnegative/truncate_table_failure5.q.out b/ql/src/test/results/clientnegative/truncate_table_failure5.q.out
+new file mode 100644
+index 0000000..d2f625d
+--- /dev/null
++++ b/ql/src/test/results/clientnegative/truncate_table_failure5.q.out
+@@ -0,0 +1,17 @@
++PREHOOK: query: create table external1 (col1 int, col2 string)
++PREHOOK: type: CREATETABLE
++PREHOOK: Output: database:default
++PREHOOK: Output: default@external1
++POSTHOOK: query: create table external1 (col1 int, col2 string)
++POSTHOOK: type: CREATETABLE
++POSTHOOK: Output: database:default
++POSTHOOK: Output: default@external1
++PREHOOK: query: alter table external1 set tblproperties ('EXTERNAL'='true')
++PREHOOK: type: ALTERTABLE_PROPERTIES
++PREHOOK: Input: default@external1
++PREHOOK: Output: default@external1
++POSTHOOK: query: alter table external1 set tblproperties ('EXTERNAL'='true')
++POSTHOOK: type: ALTERTABLE_PROPERTIES
++POSTHOOK: Input: default@external1
++POSTHOOK: Output: default@external1
++FAILED: SemanticException [Error 10146]: Cannot truncate non-managed table external1.
+diff --git a/ql/src/test/results/clientnegative/truncate_table_failure6.q.out b/ql/src/test/results/clientnegative/truncate_table_failure6.q.out
+new file mode 100644
+index 0000000..88987f5
+--- /dev/null
++++ b/ql/src/test/results/clientnegative/truncate_table_failure6.q.out
+@@ -0,0 +1,17 @@
++PREHOOK: query: create table external1 (col1 int, col2 string)
++PREHOOK: type: CREATETABLE
++PREHOOK: Output: database:default
++PREHOOK: Output: default@external1
++POSTHOOK: query: create table external1 (col1 int, col2 string)
++POSTHOOK: type: CREATETABLE
++POSTHOOK: Output: database:default
++POSTHOOK: Output: default@external1
++PREHOOK: query: alter table external1 set tblproperties ('EXTERNAL'='TRUE')
++PREHOOK: type: ALTERTABLE_PROPERTIES
++PREHOOK: Input: default@external1
++PREHOOK: Output: default@external1
++POSTHOOK: query: alter table external1 set tblproperties ('EXTERNAL'='TRUE')
++POSTHOOK: type: ALTERTABLE_PROPERTIES
++POSTHOOK: Input: default@external1
++POSTHOOK: Output: default@external1
++FAILED: SemanticException [Error 10146]: Cannot truncate non-managed table external1.
+-- 
+1.7.9.5
+

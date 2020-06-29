@@ -1,0 +1,33 @@
+From 197939d1a80b9732827c94ea98b6f526b812fd6b Mon Sep 17 00:00:00 2001
+From: Vihang Karajgaonkar <vihang@cloudera.com>
+Date: Wed, 23 May 2018 16:06:10 -0700
+Subject: [PATCH 1401/1431] CDH-70863 : HIVE-19310 : Metastore:
+ MetaStoreDirectSql.ensureDbInit has some slow DN
+ calls which might need to be run only in test env
+ (Sergey Shelukhin, reviewed by Gopal
+ Vijayaraghavan)
+
+==C5_FEATURE_IMPALA_METADATA==
+
+Change-Id: If1a90c1302804a2822015fa5dbe3b7111c0b4beb
+---
+ .../hadoop/hive/metastore/MetaStoreDirectSql.java  |    3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreDirectSql.java b/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreDirectSql.java
+index 7db18c4..d515c0d 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreDirectSql.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreDirectSql.java
+@@ -131,7 +131,8 @@ public MetaStoreDirectSql(PersistenceManager pm, Configuration conf) {
+           + " Disabling directSQL as it uses hand-hardcoded SQL with that assumption.");
+       isCompatibleDatastore = false;
+     } else {
+-      isCompatibleDatastore = ensureDbInit() && runTestQuery();
++      boolean isInTest = HiveConf.getBoolVar(conf, ConfVars.HIVE_IN_TEST);
++      isCompatibleDatastore = (!isInTest || ensureDbInit()) && runTestQuery();
+       if (isCompatibleDatastore) {
+         LOG.info("Using direct SQL, underlying DB is " + dbType);
+       }
+-- 
+1.7.9.5
+

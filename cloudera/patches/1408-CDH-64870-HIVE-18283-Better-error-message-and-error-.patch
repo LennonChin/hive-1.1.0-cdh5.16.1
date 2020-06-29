@@ -1,0 +1,618 @@
+From b1dbb50a5cf548aae54dc61a62f9ccc07b2a8f3d Mon Sep 17 00:00:00 2001
+From: Chao Sun <sunchao@apache.org>
+Date: Tue, 19 Dec 2017 16:27:40 -0800
+Subject: [PATCH 1408/1431] CDH-64870: HIVE-18283: Better error message and
+ error code for HoS exceptions (Chao Sun, reviewed
+ by Xuefu Zhang and Andrew Sherman)
+
+==C5_APPROVED_BUGFIX==
+
+Backporting this was a bit tricky, and there were a bunch of code
+conflicts. As a result, I had to backport HIVE-15772 / CDH-59802 too.
+
+(cherry picked from commit 3e032c1e5b8d05eeffe2753578168ce6ee009078)
+(cherry picked from commit 14df3b0212306a0a2d60176c26f710378037a5a1)
+
+Conflicts:
+	ql/src/java/org/apache/hadoop/hive/ql/ErrorMsg.java
+	ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkTask.java
+	ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionImpl.java
+	ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java
+	ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/RemoteSparkJobStatus.java
+	ql/src/test/org/apache/hadoop/hive/ql/exec/spark/session/TestSparkSessionManagerImpl.java
+
+Change-Id: Ie2723ae5c93eb49acc56dcc24f9cca3795e52251
+---
+ .../java/org/apache/hadoop/hive/ql/ErrorMsg.java   |   37 +++++++-
+ .../java/org/apache/hadoop/hive/ql/exec/Task.java  |    2 +-
+ .../hadoop/hive/ql/exec/spark/SparkTask.java       |   45 +++++++++-
+ .../ql/exec/spark/session/SparkSessionImpl.java    |   94 +++++++++++++++++++-
+ .../ql/exec/spark/status/LocalSparkJobMonitor.java |    1 +
+ .../exec/spark/status/RemoteSparkJobMonitor.java   |   15 +++-
+ .../hive/ql/exec/spark/status/SparkJobStatus.java  |    2 +
+ .../spark/status/impl/LocalSparkJobStatus.java     |    9 ++
+ .../spark/status/impl/RemoteSparkJobStatus.java    |   14 ++-
+ .../spark/session/TestSparkSessionManagerImpl.java |   73 +++++++++++++++
+ 10 files changed, 281 insertions(+), 11 deletions(-)
+
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/ErrorMsg.java b/ql/src/java/org/apache/hadoop/hive/ql/ErrorMsg.java
+index 724cb5f..f305753 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/ErrorMsg.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/ErrorMsg.java
+@@ -444,7 +444,9 @@
+   IMPORT_INTO_STRICT_REPL_TABLE(10303,"Non-repl import disallowed against table that is a destination of replication."),
+   REPLACE_CANNOT_DROP_COLUMNS(10313, "Replacing columns cannot drop columns for table {0}. SerDe may be incompatible", true),
+   LOCK_ACQUIRE_CANCELLED(10330, "Query was cancelled while acquiring locks on the underlying objects. "),
++
+   //========================== 20000 range starts here ========================//
++
+   SCRIPT_INIT_ERROR(20000, "Unable to initialize custom script."),
+   SCRIPT_IO_ERROR(20001, "An error occurred while reading or writing to your custom script. "
+       + "It may have crashed with an error."),
+@@ -466,10 +468,15 @@
+   FILE_NOT_FOUND(20012, "File not found: {0}", "64000", true),
+   WRONG_FILE_FORMAT(20013, "Wrong file format. Please check the file's format.", "64000", true),
+ 
++  SPARK_CREATE_CLIENT_INVALID_QUEUE(20014, "Spark job is submitted to an invalid queue: {0}."
++      + " Please fix and try again.", true),
++  SPARK_RUNTIME_OOM(20015, "Spark job failed because of out of memory."),
++
+   // An exception from runtime that will show the full stack to client
+   UNRESOLVED_RT_EXCEPTION(29999, "Runtime Error: {0}", "58004", true),
+ 
+   //========================== 30000 range starts here ========================//
++
+   STATSPUBLISHER_NOT_OBTAINED(30000, "StatsPublisher cannot be obtained. " +
+     "There was a error to retrieve the StatsPublisher, and retrying " +
+     "might help. If you dont want the query to fail because accurate statistics " +
+@@ -513,8 +520,34 @@
+   ORC_CORRUPTED_READ(30018, "Corruption in ORC data encountered. To skip reading corrupted "
+       + "data, set " + HiveConf.ConfVars.HIVE_ORC_SKIP_CORRUPT_DATA + " to true"),
+ 
+-
+-
++  SPARK_GET_JOB_INFO_TIMEOUT(30036,
++      "Spark job timed out after {0} seconds while getting job info", true),
++  SPARK_JOB_MONITOR_TIMEOUT(30037, "Job hasn''t been submitted after {0}s." +
++      " Aborting it.\nPossible reasons include network issues, " +
++      "errors in remote driver or the cluster has no available resources, etc.\n" +
++      "Please check YARN or Spark driver''s logs for further information.\n" +
++      "The timeout is controlled by " + HiveConf.ConfVars.SPARK_JOB_MONITOR_TIMEOUT + ".", true),
++
++  // Various errors when creating Spark client
++  SPARK_CREATE_CLIENT_TIMEOUT(30038,
++      "Timed out while creating Spark client for session {0}.", true),
++  SPARK_CREATE_CLIENT_QUEUE_FULL(30039,
++      "Failed to create Spark client because job queue is full: {0}.", true),
++  SPARK_CREATE_CLIENT_INTERRUPTED(30040,
++      "Interrupted while creating Spark client for session {0}", true),
++  SPARK_CREATE_CLIENT_ERROR(30041,
++      "Failed to create Spark client for Spark session {0}", true),
++  SPARK_CREATE_CLIENT_INVALID_RESOURCE_REQUEST(30042,
++      "Failed to create Spark client due to invalid resource request: {0}", true),
++  SPARK_CREATE_CLIENT_CLOSED_SESSION(30043,
++      "Cannot create Spark client on a closed session {0}", true),
++
++  SPARK_JOB_INTERRUPTED(30044, "Spark job was interrupted while executing"),
++
++  //========================== 40000 range starts here ========================//
++
++  SPARK_JOB_RUNTIME_ERROR(40001,
++      "Spark job failed during runtime. Please check stacktrace for the root cause.")
+   ;
+ 
+   private int errorCode;
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/Task.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/Task.java
+index b69e020..16fbc84 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/Task.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/Task.java
+@@ -597,7 +597,7 @@ Throwable getException() {
+     return exception;
+   }
+ 
+-  void setException(Throwable ex) {
++  protected void setException(Throwable ex) {
+     exception = ex;
+   }
+ 
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkTask.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkTask.java
+index 4bdaa75..5aea2f6 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkTask.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkTask.java
+@@ -29,12 +29,14 @@
+ import java.util.Map;
+ 
+ import org.apache.hadoop.hive.common.StatsSetupConst;
++import com.google.common.base.Throwables;
+ import org.apache.hadoop.hive.common.metrics.common.Metrics;
+ import org.apache.hadoop.hive.common.metrics.common.MetricsConstant;
+ import org.apache.hadoop.hive.conf.HiveConf;
+ import org.apache.hadoop.hive.metastore.Warehouse;
+ import org.apache.hadoop.hive.metastore.api.MetaException;
+ import org.apache.hadoop.hive.ql.DriverContext;
++import org.apache.hadoop.hive.ql.ErrorMsg;
+ import org.apache.hadoop.hive.ql.QueryPlan;
+ import org.apache.hadoop.hive.ql.exec.FileSinkOperator;
+ import org.apache.hadoop.hive.ql.exec.JoinOperator;
+@@ -51,7 +53,6 @@
+ import org.apache.hadoop.hive.ql.exec.spark.session.SparkSession;
+ import org.apache.hadoop.hive.ql.exec.spark.session.SparkSessionManager;
+ import org.apache.hadoop.hive.ql.exec.spark.session.SparkSessionManagerImpl;
+-import org.apache.hadoop.hive.ql.exec.spark.status.LocalSparkJobMonitor;
+ import org.apache.hadoop.hive.ql.exec.spark.status.SparkJobRef;
+ import org.apache.hadoop.hive.ql.exec.spark.status.SparkJobStatus;
+ import org.apache.hadoop.hive.ql.history.HiveHistory.Keys;
+@@ -75,6 +76,7 @@
+ import org.apache.hive.spark.counter.SparkCounters;
+ 
+ import com.google.common.collect.Lists;
++import org.apache.spark.SparkException;
+ 
+ public class SparkTask extends Task<SparkWork> {
+   private static final String CLASS_NAME = SparkTask.class.getName();
+@@ -110,6 +112,7 @@ public int execute(DriverContext driverContext) {
+       addToHistory(jobRef);
+       rc = jobRef.monitorJob();
+       SparkJobStatus sparkJobStatus = jobRef.getSparkJobStatus();
++      getSparkJobInfo(sparkJobStatus, rc);
+       if (rc == 0) {
+         sparkCounters = sparkJobStatus.getCounter();
+         // for RSC, we should get the counters after job has finished
+@@ -133,7 +136,13 @@ public int execute(DriverContext driverContext) {
+       // org.apache.commons.lang.StringUtils
+       console.printError(msg, "\n" + org.apache.hadoop.util.StringUtils.stringifyException(e));
+       LOG.error(msg, e);
+-      rc = 1;
++      setException(e);
++      if (e instanceof HiveException) {
++        HiveException he = (HiveException) e;
++        rc = he.getCanonicalErrorMsg().getErrorCode();
++      } else {
++        rc = 1;
++      }
+     } finally {
+       Utilities.clearWork(conf);
+       if (sparkSession != null && sparkSessionManager != null) {
+@@ -427,4 +436,36 @@ public void shutdown() {
+ 
+     return counters;
+   }
++
++  private void getSparkJobInfo(SparkJobStatus sparkJobStatus, int rc) {
++    try {
++      if (rc != 0) {
++        Throwable error = sparkJobStatus.getError();
++        if (error != null) {
++          HiveException he;
++          if (isOOMError(error)) {
++            he = new HiveException(error, ErrorMsg.SPARK_RUNTIME_OOM);
++          } else {
++            he = new HiveException(error, ErrorMsg.SPARK_JOB_RUNTIME_ERROR);
++          }
++          setException(he);
++        }
++      }
++    } catch (Exception e) {
++      LOG.error("Failed to get Spark job information", e);
++    }
++  }
++
++  private boolean isOOMError(Throwable error) {
++    while (error != null) {
++      if (error instanceof OutOfMemoryError) {
++        return true;
++      } else if (error instanceof SparkException) {
++        String sts = Throwables.getStackTraceAsString(error);
++        return sts.contains("Container killed by YARN for exceeding memory limits");
++      }
++      error = error.getCause();
++    }
++    return false;
++  }
+ }
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionImpl.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionImpl.java
+index aa9d197..73e95bd 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionImpl.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionImpl.java
+@@ -18,13 +18,22 @@
+ package org.apache.hadoop.hive.ql.exec.spark.session;
+ 
+ import java.io.IOException;
++import java.util.Map;
+ import java.util.UUID;
++import java.util.concurrent.TimeoutException;
++import java.util.regex.Matcher;
++import java.util.regex.Pattern;
+ 
+ import org.apache.commons.logging.Log;
+ import org.apache.commons.logging.LogFactory;
++import com.google.common.annotations.VisibleForTesting;
++import com.google.common.base.Throwables;
++import com.google.common.collect.ImmutableMap;
++import com.google.common.collect.Maps;
+ import org.apache.hadoop.fs.FileSystem;
+ import org.apache.hadoop.fs.Path;
+ import org.apache.hadoop.fs.permission.FsPermission;
++import org.apache.hadoop.hive.ql.ErrorMsg;
+ import org.apache.hadoop.hive.ql.session.SessionState;
+ import org.apache.hadoop.hive.common.ObjectPair;
+ import org.apache.hadoop.hive.conf.HiveConf;
+@@ -43,15 +52,30 @@
+   private static final Log LOG = LogFactory.getLog(SparkSession.class);
+   private static final String SPARK_DIR = "_spark_session_dir";
+ 
++  /** Regex for different Spark session error messages */
++  private static final String AM_TIMEOUT_ERR = ".*ApplicationMaster for attempt.*timed out.*";
++  private static final String UNKNOWN_QUEUE_ERR = "(submitted by user.*to unknown queue:.*)\n";
++  private static final String STOPPED_QUEUE_ERR = "(Queue.*is STOPPED)";
++  private static final String FULL_QUEUE_ERR = "(Queue.*already has.*applications)";
++  private static final String INVALILD_MEM_ERR =
++      "(Required executor memory.*is above the max threshold.*) of this";
++  private static final String INVALID_CORE_ERR =
++      "(initial executor number.*must between min executor.*and max executor number.*)\n";
++
++  /** Pre-compiled error patterns. Shared between all Spark sessions */
++  private static Map<String, Pattern> errorPatterns;
++
+   private HiveConf conf;
+   private boolean isOpen;
+   private final String sessionId;
+   private HiveSparkClient hiveSparkClient;
+   private Path scratchDir;
+   private final Object dirLock = new Object();
++  private String matchedString = null;
+ 
+   public SparkSessionImpl() {
+     sessionId = makeSessionId();
++    initErrorPatterns();
+   }
+ 
+   @Override
+@@ -61,7 +85,14 @@ public void open(HiveConf conf) throws HiveException {
+     try {
+       hiveSparkClient = HiveSparkClientFactory.createHiveSparkClient(conf, sessionId);
+     } catch (Throwable e) {
+-      throw new HiveException("Failed to create spark client.", e);
++      // It's possible that user session is closed while creating Spark client.
++      HiveException he;
++      if (isOpen) {
++        he = getHiveException(e);
++      } else {
++        he = new HiveException(e, ErrorMsg.SPARK_CREATE_CLIENT_CLOSED_SESSION, sessionId);
++      }
++      throw he;
+     }
+   }
+ 
+@@ -144,6 +175,67 @@ private Path createScratchDir() throws IOException {
+     return sparkDir;
+   }
+ 
++  private static void initErrorPatterns() {
++    errorPatterns = Maps.newHashMap(
++        new ImmutableMap.Builder<String, Pattern>()
++            .put(AM_TIMEOUT_ERR, Pattern.compile(AM_TIMEOUT_ERR))
++            .put(UNKNOWN_QUEUE_ERR, Pattern.compile(UNKNOWN_QUEUE_ERR))
++            .put(STOPPED_QUEUE_ERR, Pattern.compile(STOPPED_QUEUE_ERR))
++            .put(FULL_QUEUE_ERR, Pattern.compile(FULL_QUEUE_ERR))
++            .put(INVALILD_MEM_ERR, Pattern.compile(INVALILD_MEM_ERR))
++            .put(INVALID_CORE_ERR, Pattern.compile(INVALID_CORE_ERR))
++            .build()
++    );
++  }
++
++  @VisibleForTesting
++  HiveException getHiveException(Throwable e) {
++    Throwable oe = e;
++    while (e != null) {
++      if (e instanceof TimeoutException) {
++        return new HiveException(e, ErrorMsg.SPARK_CREATE_CLIENT_TIMEOUT);
++      } else if (e instanceof InterruptedException) {
++        return new HiveException(e, ErrorMsg.SPARK_CREATE_CLIENT_INTERRUPTED, sessionId);
++      } else if (e instanceof RuntimeException) {
++        String sts = Throwables.getStackTraceAsString(e);
++        if (matches(sts, AM_TIMEOUT_ERR)) {
++          return new HiveException(e, ErrorMsg.SPARK_CREATE_CLIENT_TIMEOUT);
++        } else if (matches(sts, UNKNOWN_QUEUE_ERR) || matches(sts, STOPPED_QUEUE_ERR)) {
++          return new HiveException(e, ErrorMsg.SPARK_CREATE_CLIENT_INVALID_QUEUE, matchedString);
++        } else if (matches(sts, FULL_QUEUE_ERR)) {
++          return new HiveException(e, ErrorMsg.SPARK_CREATE_CLIENT_QUEUE_FULL, matchedString);
++        } else if (matches(sts, INVALILD_MEM_ERR) || matches(sts, INVALID_CORE_ERR)) {
++          return new HiveException(e, ErrorMsg.SPARK_CREATE_CLIENT_INVALID_RESOURCE_REQUEST,
++              matchedString);
++        } else {
++          return new HiveException(e, ErrorMsg.SPARK_CREATE_CLIENT_ERROR, sessionId);
++        }
++      }
++      e = e.getCause();
++    }
++
++    return new HiveException(oe, ErrorMsg.SPARK_CREATE_CLIENT_ERROR, sessionId);
++  }
++
++  @VisibleForTesting
++  String getMatchedString() {
++    return matchedString;
++  }
++
++  private boolean matches(String input, String regex) {
++    if (!errorPatterns.containsKey(regex)) {
++      LOG.warn("No error pattern found for regex: " + regex);
++      return false;
++    }
++    Pattern p = errorPatterns.get(regex);
++    Matcher m = p.matcher(input);
++    boolean result = m.find();
++    if (result && m.groupCount() == 1) {
++      this.matchedString = m.group(1);
++    }
++    return result;
++  }
++
+   private void cleanScratchDir() throws IOException {
+     if (scratchDir != null) {
+       FileSystem fs = scratchDir.getFileSystem(conf);
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/LocalSparkJobMonitor.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/LocalSparkJobMonitor.java
+index 5f0352a..57130e0 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/LocalSparkJobMonitor.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/LocalSparkJobMonitor.java
+@@ -128,6 +128,7 @@ public int startMonitor() {
+         console.printError(msg, "\n" + org.apache.hadoop.util.StringUtils.stringifyException(e));
+         rc = 1;
+         done = true;
++        sparkJobStatus.setError(e);
+       } finally {
+         if (done) {
+           break;
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java
+index 88216c7..db4a3a3 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java
+@@ -22,9 +22,11 @@
+ 
+ import com.google.common.base.Preconditions;
+ import org.apache.hadoop.hive.conf.HiveConf;
++import org.apache.hadoop.hive.ql.ErrorMsg;
+ import org.apache.hadoop.hive.ql.exec.Utilities;
+ import org.apache.hadoop.hive.ql.exec.spark.status.impl.RemoteSparkJobStatus;
+ import org.apache.hadoop.hive.ql.log.PerfLogger;
++import org.apache.hadoop.hive.ql.metadata.HiveException;
+ import org.apache.hive.spark.client.JobHandle;
+ import org.apache.spark.JobExecutionStatus;
+ 
+@@ -67,11 +69,11 @@ public int startMonitor() {
+         case QUEUED:
+           long timeCount = (System.currentTimeMillis() - startTime) / 1000;
+           if ((timeCount > monitorTimeoutInteval)) {
+-            console.printError("Job hasn't been submitted after " + timeCount + "s." +
+-                " Aborting it.\nPossible reasons include network issues, " +
+-                "errors in remote driver or the cluster has no available resources, etc.\n" +
+-                "Please check YARN or Spark driver's logs for further information.");
++            HiveException he = new HiveException(ErrorMsg.SPARK_JOB_MONITOR_TIMEOUT,
++                Long.toString(timeCount));
++            console.printError(he.getMessage());
+             console.printError("Status: " + state);
++            sparkJobStatus.setError(he);
+             running = false;
+             done = true;
+             rc = 2;
+@@ -157,6 +159,10 @@ public int startMonitor() {
+           Thread.sleep(checkInterval);
+         }
+       } catch (Exception e) {
++        Exception finalException = e;
++        if (e instanceof InterruptedException) {
++          finalException = new HiveException(e, ErrorMsg.SPARK_JOB_INTERRUPTED);
++        }
+         String msg = " with exception '" + Utilities.getNameMessage(e) + "'";
+         msg = "Failed to monitor Job[" + sparkJobStatus.getJobId() + "]" + msg;
+ 
+@@ -166,6 +172,7 @@ public int startMonitor() {
+         console.printError(msg, "\n" + org.apache.hadoop.util.StringUtils.stringifyException(e));
+         rc = 1;
+         done = true;
++        sparkJobStatus.setError(finalException);
+       } finally {
+         if (done) {
+           break;
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/SparkJobStatus.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/SparkJobStatus.java
+index 72ce439..1ebb1ed 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/SparkJobStatus.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/SparkJobStatus.java
+@@ -46,4 +46,6 @@
+   void cleanup();
+ 
+   Throwable getError();
++
++  void setError(Throwable e);
+ }
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/LocalSparkJobStatus.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/LocalSparkJobStatus.java
+index 06bcdff..501eb0e 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/LocalSparkJobStatus.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/LocalSparkJobStatus.java
+@@ -53,6 +53,7 @@
+   private SparkCounters sparkCounters;
+   private JavaFutureAction<Void> future;
+   private Set<Integer> cachedRDDIds;
++  private Throwable error;
+ 
+   public LocalSparkJobStatus(JavaSparkContext sparkContext, int jobId,
+       JobMetricsListener jobMetricsListener, SparkCounters sparkCounters,
+@@ -234,6 +235,9 @@ public void cleanup() {
+ 
+   @Override
+   public Throwable getError() {
++    if (error != null) {
++      return error;
++    }
+     if (future.isDone()) {
+       try {
+         future.get();
+@@ -244,6 +248,11 @@ public Throwable getError() {
+     return null;
+   }
+ 
++  @Override
++  public void setError(Throwable e) {
++    this.error = e;
++  }
++
+   private SparkJobInfo getJobInfo() {
+     return sparkContext.statusTracker().getJobInfo(jobId);
+   }
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/RemoteSparkJobStatus.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/RemoteSparkJobStatus.java
+index defec94..6b53cb2 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/RemoteSparkJobStatus.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/RemoteSparkJobStatus.java
+@@ -20,6 +20,7 @@
+ 
+ import org.apache.commons.logging.Log;
+ import org.apache.commons.logging.LogFactory;
++import org.apache.hadoop.hive.ql.ErrorMsg;
+ import org.apache.hadoop.hive.ql.exec.spark.Statistic.SparkStatistics;
+ import org.apache.hadoop.hive.ql.exec.spark.Statistic.SparkStatisticsBuilder;
+ import org.apache.hadoop.hive.ql.metadata.HiveException;
+@@ -53,11 +54,13 @@
+   private static final Log LOG = LogFactory.getLog(RemoteSparkJobStatus.class.getName());
+   private final SparkClient sparkClient;
+   private final JobHandle<Serializable> jobHandle;
++  private Throwable error;
+   private final transient long sparkClientTimeoutInSeconds;
+ 
+   public RemoteSparkJobStatus(SparkClient sparkClient, JobHandle<Serializable> jobHandle, long timeoutInSeconds) {
+     this.sparkClient = sparkClient;
+     this.jobHandle = jobHandle;
++    this.error = null;
+     this.sparkClientTimeoutInSeconds = timeoutInSeconds;
+   }
+ 
+@@ -140,9 +143,17 @@ public void cleanup() {
+ 
+   @Override
+   public Throwable getError() {
++    if (error != null) {
++      return error;
++    }
+     return jobHandle.getError();
+   }
+ 
++  @Override
++  public void setError(Throwable e) {
++    this.error = e;
++  }
++
+   /**
+    * Indicates whether the remote context is active. SparkJobMonitor can use this to decide whether
+    * to stop monitoring.
+@@ -163,7 +174,8 @@ private SparkJobInfo getSparkJobInfo() throws HiveException {
+       return getJobInfo.get(sparkClientTimeoutInSeconds, TimeUnit.SECONDS);
+     } catch (Exception e) {
+       LOG.warn("Failed to get job info.", e);
+-      throw new HiveException(e);
++      throw new HiveException(e, ErrorMsg.SPARK_GET_JOB_INFO_TIMEOUT,
++          Long.toString(sparkClientTimeoutInSeconds));
+     }
+   }
+ 
+diff --git a/ql/src/test/org/apache/hadoop/hive/ql/exec/spark/session/TestSparkSessionManagerImpl.java b/ql/src/test/org/apache/hadoop/hive/ql/exec/spark/session/TestSparkSessionManagerImpl.java
+index 4d93ea6..c1bdc9b 100644
+--- a/ql/src/test/org/apache/hadoop/hive/ql/exec/spark/session/TestSparkSessionManagerImpl.java
++++ b/ql/src/test/org/apache/hadoop/hive/ql/exec/spark/session/TestSparkSessionManagerImpl.java
+@@ -19,14 +19,18 @@
+ 
+ import org.apache.commons.logging.Log;
+ import org.apache.commons.logging.LogFactory;
++import org.apache.hadoop.hive.ql.ErrorMsg;
+ import org.apache.hadoop.hive.conf.HiveConf;
++import org.apache.hadoop.hive.ql.metadata.HiveException;
+ import org.apache.hadoop.util.StringUtils;
+ import org.junit.Test;
+ 
+ import java.util.ArrayList;
+ import java.util.List;
+ import java.util.Random;
++import java.util.concurrent.TimeoutException;
+ 
++import static org.junit.Assert.assertEquals;
+ import static org.junit.Assert.assertFalse;
+ import static org.junit.Assert.assertTrue;
+ import static org.junit.Assert.fail;
+@@ -97,6 +101,75 @@ public void testMultiSessionMultipleUse() throws Exception {
+     sessionManagerHS2.shutdown();
+   }
+ 
++  @Test
++  public void testGetHiveException() throws Exception {
++    HiveConf conf = new HiveConf();
++    conf.set("spark.master", "local");
++    SparkSessionManager ssm = SparkSessionManagerImpl.getInstance();
++    SparkSessionImpl ss = (SparkSessionImpl) ssm.getSession(
++        null, conf, true);
++
++    Throwable e;
++
++    e = new TimeoutException();
++    checkHiveException(ss, e, ErrorMsg.SPARK_CREATE_CLIENT_TIMEOUT);
++
++    e = new InterruptedException();
++    checkHiveException(ss, e, ErrorMsg.SPARK_CREATE_CLIENT_INTERRUPTED);
++
++    e = new RuntimeException("\t diagnostics: Application application_1508358311878_3322732 "
++        + "failed 1 times due to ApplicationMaster for attempt "
++        + "appattempt_1508358311878_3322732_000001 timed out. Failing the application.");
++    checkHiveException(ss, e, ErrorMsg.SPARK_CREATE_CLIENT_TIMEOUT);
++
++    e = new RuntimeException("\t diagnostics: Application application_1508358311878_3330000 "
++        + "submitted by user hive to unknown queue: foo");
++    checkHiveException(ss, e, ErrorMsg.SPARK_CREATE_CLIENT_INVALID_QUEUE,
++        "submitted by user hive to unknown queue: foo");
++
++    e = new RuntimeException("\t diagnostics: org.apache.hadoop.security.AccessControlException: "
++        + "Queue root.foo is STOPPED. Cannot accept submission of application: "
++        + "application_1508358311878_3369187");
++    checkHiveException(ss, e, ErrorMsg.SPARK_CREATE_CLIENT_INVALID_QUEUE,
++        "Queue root.foo is STOPPED");
++
++    e = new RuntimeException("\t diagnostics: org.apache.hadoop.security.AccessControlException: "
++        + "Queue root.foo already has 10 applications, cannot accept submission of application: "
++        + "application_1508358311878_3384544");
++    checkHiveException(ss, e, ErrorMsg.SPARK_CREATE_CLIENT_QUEUE_FULL,
++        "Queue root.foo already has 10 applications");
++
++    e = new RuntimeException("Exception in thread \"\"main\"\" java.lang.IllegalArgumentException: "
++        + "Required executor memory (7168+10240 MB) is above the max threshold (16384 MB) of this "
++        + "cluster! Please check the values of 'yarn.scheduler.maximum-allocation-mb' and/or "
++        + "'yarn.nodemanager.resource.memory-mb'.");
++    checkHiveException(ss, e, ErrorMsg.SPARK_CREATE_CLIENT_INVALID_RESOURCE_REQUEST,
++        "Required executor memory (7168+10240 MB) is above the max threshold (16384 MB)");
++
++    e = new RuntimeException("Exception in thread \"\"main\"\" java.lang.IllegalArgumentException: "
++        + "requirement failed: initial executor number 5 must between min executor number10 "
++        + "and max executor number 50");
++    checkHiveException(ss, e, ErrorMsg.SPARK_CREATE_CLIENT_INVALID_RESOURCE_REQUEST,
++        "initial executor number 5 must between min executor number10 and max executor number 50");
++
++    // Other exceptions which defaults to SPARK_CREATE_CLIENT_ERROR
++    e = new Exception();
++    checkHiveException(ss, e, ErrorMsg.SPARK_CREATE_CLIENT_ERROR);
++  }
++
++  private void checkHiveException(SparkSessionImpl ss, Throwable e, ErrorMsg expectedErrMsg) {
++    checkHiveException(ss, e, expectedErrMsg, null);
++  }
++
++  private void checkHiveException(SparkSessionImpl ss, Throwable e,
++      ErrorMsg expectedErrMsg, String expectedMatchedStr) {
++    HiveException he = ss.getHiveException(e);
++    assertEquals(expectedErrMsg, he.getCanonicalErrorMsg());
++    if (expectedMatchedStr != null) {
++      assertEquals(expectedMatchedStr, ss.getMatchedString());
++    }
++  }
++
+   /* Thread simulating a user session in HiveServer2. */
+   public class SessionThread implements Runnable {
+ 
+-- 
+1.7.9.5
+

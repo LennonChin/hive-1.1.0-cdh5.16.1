@@ -1,0 +1,140 @@
+From e18d5c2a4e664e34e0a91b7803e6e3c396cf13a3 Mon Sep 17 00:00:00 2001
+From: Bharath Krishna <bharath@cloudera.com>
+Date: Wed, 29 Aug 2018 21:53:53 -0700
+Subject: [PATCH 1421/1431] CDH-67053 : Upgrade c5 jackson version (Hive)
+
+==C5_APPROVED_BUGFIX==
+
+Change-Id: Ia3bce2f089a6b4fa9bc797338684ea0a463d88c6
+---
+ common/pom.xml                     |    2 +-
+ hcatalog/core/pom.xml              |    2 +-
+ hcatalog/server-extensions/pom.xml |    2 +-
+ hcatalog/webhcat/svr/pom.xml       |    2 +-
+ itests/hive-blobstore/pom.xml      |    2 +-
+ pom.xml                            |    8 +++++---
+ ql/pom.xml                         |    2 +-
+ testutils/ptest2/pom.xml           |    2 +-
+ 8 files changed, 12 insertions(+), 10 deletions(-)
+
+diff --git a/common/pom.xml b/common/pom.xml
+index e3315ca..c711749 100644
+--- a/common/pom.xml
++++ b/common/pom.xml
+@@ -133,7 +133,7 @@
+     <dependency>
+       <groupId>com.fasterxml.jackson.core</groupId>
+       <artifactId>jackson-databind</artifactId>
+-      <version>${jackson.new.version}</version>
++      <version>${jackson-databind.2.2.version}</version>
+     </dependency>
+   </dependencies>
+ 
+diff --git a/hcatalog/core/pom.xml b/hcatalog/core/pom.xml
+index 1241dc9..448b4a1 100644
+--- a/hcatalog/core/pom.xml
++++ b/hcatalog/core/pom.xml
+@@ -77,7 +77,7 @@
+     <dependency>
+       <groupId>org.codehaus.jackson</groupId>
+       <artifactId>jackson-mapper-asl</artifactId>
+-      <version>${jackson.version}</version>
++      <version>${jackson-mapper-asl.1.9.version}</version>
+     </dependency>
+       <dependency>
+       <groupId>com.sun.jersey</groupId>
+diff --git a/hcatalog/server-extensions/pom.xml b/hcatalog/server-extensions/pom.xml
+index e64c681..11705d8 100644
+--- a/hcatalog/server-extensions/pom.xml
++++ b/hcatalog/server-extensions/pom.xml
+@@ -54,7 +54,7 @@
+     <dependency>
+       <groupId>org.codehaus.jackson</groupId>
+       <artifactId>jackson-mapper-asl</artifactId>
+-      <version>${jackson.version}</version>
++      <version>${jackson-mapper-asl.1.9.version}</version>
+     </dependency>
+     <!-- test intra-project -->
+     <dependency>
+diff --git a/hcatalog/webhcat/svr/pom.xml b/hcatalog/webhcat/svr/pom.xml
+index 0970e4d..dc25f8e 100644
+--- a/hcatalog/webhcat/svr/pom.xml
++++ b/hcatalog/webhcat/svr/pom.xml
+@@ -90,7 +90,7 @@
+      <dependency>
+       <groupId>org.codehaus.jackson</groupId>
+       <artifactId>jackson-mapper-asl</artifactId>
+-      <version>${jackson.version}</version>
++      <version>${jackson-mapper-asl.1.9.version}</version>
+     </dependency>
+     <dependency>
+       <groupId>org.eclipse.jetty.aggregate</groupId>
+diff --git a/itests/hive-blobstore/pom.xml b/itests/hive-blobstore/pom.xml
+index eaee396..f4bcf5e 100644
+--- a/itests/hive-blobstore/pom.xml
++++ b/itests/hive-blobstore/pom.xml
+@@ -260,7 +260,7 @@
+     <dependency>
+       <groupId>com.fasterxml.jackson.core</groupId>
+       <artifactId>jackson-databind</artifactId>
+-      <version>${jackson.new.version}</version>
++      <version>${jackson-databind.2.2.version}</version>
+     </dependency>
+   </dependencies>
+ 
+diff --git a/pom.xml b/pom.xml
+index ae4fc59..faedcf1 100644
+--- a/pom.xml
++++ b/pom.xml
+@@ -137,9 +137,11 @@
+     <httpcomponents.client.version>${cdh.httpcomponents.version}</httpcomponents.client.version>
+     <httpcomponents.core.version>${cdh.httpcomponents.core.version}</httpcomponents.core.version>
+     <ivy.version>2.4.0</ivy.version>
+-    <jackson.version>1.9.2</jackson.version>
++    <jackson.version>${cdh.jackson.1.9.version}</jackson.version>
+     <!-- jackson 1 and 2 lines can coexist without issue, as they have different artifactIds -->
+-    <jackson.new.version>2.2.2</jackson.new.version>
++    <jackson.new.version>${cdh.jackson.2.2.version}</jackson.new.version>
++    <jackson-databind.2.2.version>${cdh.jackson-databind.2.2.version}</jackson-databind.2.2.version>
++    <jackson-mapper-asl.1.9.version>${cdh.jackson-mapper-asl.1.9.version}</jackson-mapper-asl.1.9.version>
+     <jasper.version>5.5.23</jasper.version>
+     <jamon.plugin.version>2.3.4</jamon.plugin.version>
+     <jamon-runtime.version>2.3.1</jamon-runtime.version>
+@@ -552,7 +554,7 @@
+       <dependency>
+         <groupId>org.codehaus.jackson</groupId>
+         <artifactId>jackson-mapper-asl</artifactId>
+-        <version>${jackson.version}</version>
++        <version>${jackson-mapper-asl.1.9.version}</version>
+       </dependency>
+       <dependency>
+         <groupId>org.codehaus.jackson</groupId>
+diff --git a/ql/pom.xml b/ql/pom.xml
+index 604f85d..a6113e2 100644
+--- a/ql/pom.xml
++++ b/ql/pom.xml
+@@ -235,7 +235,7 @@
+     <dependency>
+       <groupId>org.codehaus.jackson</groupId>
+       <artifactId>jackson-mapper-asl</artifactId>
+-      <version>${jackson.version}</version>
++      <version>${jackson-mapper-asl.1.9.version}</version>
+     </dependency>
+     <dependency>
+       <groupId>org.datanucleus</groupId>
+diff --git a/testutils/ptest2/pom.xml b/testutils/ptest2/pom.xml
+index 95267f9..1b24e9f 100644
+--- a/testutils/ptest2/pom.xml
++++ b/testutils/ptest2/pom.xml
+@@ -134,7 +134,7 @@ limitations under the License.
+     <dependency>
+       <groupId>org.codehaus.jackson</groupId>
+       <artifactId>jackson-mapper-asl</artifactId>
+-      <version>1.9.12</version>
++      <version>${jackson-mapper-asl.1.9.version}</version>
+     </dependency>
+     <dependency>
+       <groupId>org.slf4j</groupId>
+-- 
+1.7.9.5
+

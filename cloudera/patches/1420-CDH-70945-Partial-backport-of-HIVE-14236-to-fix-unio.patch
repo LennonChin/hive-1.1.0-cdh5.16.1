@@ -1,0 +1,71 @@
+From be66c4159c08480570254d23a015b243edf5207d Mon Sep 17 00:00:00 2001
+From: stakiar <stakiar@cloudera.com>
+Date: Mon, 3 Sep 2018 16:33:09 -0700
+Subject: [PATCH 1420/1431] CDH-70945: Partial backport of HIVE-14236 to fix
+ union-stats related errors
+
+==C5_APPROVED_BUGFIX==
+
+This is a partial backport of HIVE-14236 which is required
+to fix some test failures introduced when backporting
+CDH-70945 / HIVE-17213.
+
+Change-Id: If4af1808e13e4c7b3aa08f3eae7b1b2897efdc2f
+---
+ .../org/apache/hadoop/hive/ql/exec/MoveTask.java   |    8 ++++++++
+ .../hadoop/hive/ql/optimizer/GenMapRedUtils.java   |   13 ++++++-------
+ 2 files changed, 14 insertions(+), 7 deletions(-)
+
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/MoveTask.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/MoveTask.java
+index b93203d..924f3b3 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/MoveTask.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/MoveTask.java
+@@ -226,6 +226,14 @@ private void releaseLocks(LoadTableDesc ltd) throws HiveException {
+     }
+   }
+ 
++  // we check if there is only one immediate child task and it is stats task
++  public boolean hasFollowingStatsTask() {
++    if (this.getNumChild() == 1) {
++      return this.getChildTasks().get(0) instanceof StatsTask;
++    }
++    return false;
++  }
++
+   @Override
+   public int execute(DriverContext driverContext) {
+ 
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/optimizer/GenMapRedUtils.java b/ql/src/java/org/apache/hadoop/hive/ql/optimizer/GenMapRedUtils.java
+index 29376db..f57e4cf 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/optimizer/GenMapRedUtils.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/optimizer/GenMapRedUtils.java
+@@ -1460,12 +1460,6 @@ public static void addStatsTask(FileSinkOperator nd, MoveTask mvTask,
+     statsWork.setAggKey(nd.getConf().getStatsAggPrefix());
+     Task<? extends Serializable> statsTask = TaskFactory.get(statsWork, hconf);
+ 
+-    // mark the MapredWork and FileSinkOperator for gathering stats
+-    nd.getConf().setGatherStats(true);
+-    nd.getConf().setStatsReliable(hconf.getBoolVar(ConfVars.HIVE_STATS_RELIABLE));
+-    nd.getConf().setMaxStatsKeyPrefixLength(StatsFactory.getMaxPrefixLength(hconf));
+-    // mrWork.addDestinationTable(nd.getConf().getTableInfo().getTableName());
+-
+     // subscribe feeds from the MoveTask so that MoveTask can forward the list
+     // of dynamic partition list to the StatsTask
+     mvTask.addDependentTask(statsTask);
+@@ -1798,7 +1792,12 @@ public static boolean isMergeRequired(List<Task<MoveWork>> mvTasks, HiveConf hco
+       MoveTask mvTask = (MoveTask) GenMapRedUtils.findMoveTask(mvTasks, fsOp);
+ 
+       if (mvTask != null && isInsertTable && hconf.getBoolVar(ConfVars.HIVESTATSAUTOGATHER)) {
+-        GenMapRedUtils.addStatsTask(fsOp, mvTask, currTask, hconf);
++          fsOp.getConf().setGatherStats(true);
++          fsOp.getConf().setStatsReliable(hconf.getBoolVar(ConfVars.HIVE_STATS_RELIABLE));
++          fsOp.getConf().setMaxStatsKeyPrefixLength(StatsFactory.getMaxPrefixLength(hconf));
++          if (!mvTask.hasFollowingStatsTask()) {
++            GenMapRedUtils.addStatsTask(fsOp, mvTask, currTask, hconf);
++          }
+       }
+ 
+       if ((mvTask != null) && !mvTask.isLocal() && fsOp.getConf().canBeMerged()) {
+-- 
+1.7.9.5
+

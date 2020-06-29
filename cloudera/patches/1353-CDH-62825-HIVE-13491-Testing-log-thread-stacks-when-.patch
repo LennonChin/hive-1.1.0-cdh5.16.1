@@ -1,0 +1,64 @@
+From 348e77f89d186b72e379e6aead2adb78fd07fd2d Mon Sep 17 00:00:00 2001
+From: Thejas Nair <thejas@hortonworks.com>
+Date: Tue, 12 Apr 2016 12:09:47 -0700
+Subject: [PATCH 1353/1431] CDH-62825: HIVE-13491 : Testing : log thread
+ stacks when metastore fails to start (Thejas
+ Nair, reviewed by Szehon Ho)
+
+(cherry picked from commit e16bcca649bb55375860917726fab7545717d5c2)
+
+Change-Id: I1f603137df7b083eb64da5a148e790065c408830
+---
+ .../hadoop/hive/metastore/MetaStoreUtils.java      |   28 ++++++++++++++++++--
+ 1 file changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreUtils.java b/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreUtils.java
+index 5062f77..859ae90 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreUtils.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreUtils.java
+@@ -1188,16 +1188,40 @@ private static void loopUntilHMSReady(int port) throws Exception {
+         socket.close();
+         return;
+       } catch (Exception e) {
+-        if (retries++ > 6) { //give up
++        if (retries++ > 60) { //give up
+           exc = e;
+           break;
+         }
+-        Thread.sleep(10000);
++        Thread.sleep(1000);
+       }
+     }
++    // something is preventing metastore from starting
++    // print the stack from all threads for debugging purposes
++    LOG.error("Unable to connect to metastore server: " + exc.getMessage());
++    LOG.info("Printing all thread stack traces for debugging before throwing exception.");
++    LOG.info(getAllThreadStacksAsString());
+     throw exc;
+   }
+ 
++  private static String getAllThreadStacksAsString() {
++    Map<Thread, StackTraceElement[]> threadStacks = Thread.getAllStackTraces();
++    StringBuilder sb = new StringBuilder();
++    for (Map.Entry<Thread, StackTraceElement[]> entry : threadStacks.entrySet()) {
++      Thread t = entry.getKey();
++      sb.append(System.lineSeparator());
++      sb.append("Name: ").append(t.getName()).append(" State: " + t.getState());
++      addStackString(entry.getValue(), sb);
++    }
++    return sb.toString();
++  }
++
++  private static void addStackString(StackTraceElement[] stackElems, StringBuilder sb) {
++    sb.append(System.lineSeparator());
++    for (StackTraceElement stackElem : stackElems) {
++      sb.append(stackElem).append(System.lineSeparator());
++    }
++  }
++
+   /**
+    * Finds a free port on the machine.
+    *
+-- 
+1.7.9.5
+

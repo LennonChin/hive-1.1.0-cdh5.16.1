@@ -1,0 +1,49 @@
+From d3e4941f990865d64ab0453dc04fa010fdfba873 Mon Sep 17 00:00:00 2001
+From: Naveen Gangam <ngangam@apache.org>
+Date: Wed, 1 Nov 2017 11:27:36 -0400
+Subject: [PATCH 1324/1431] CDH-61773 HIVE-16663: String Caching For Rows
+ (Beluga Behr, reviewed by Naveen Gangam,
+ Ashutosh)
+
+Change-Id: Id41ee7d0a5fc1f360a4555d5ff20d82d22bf07e9
+---
+ beeline/src/java/org/apache/hive/beeline/Rows.java |   18 +++++++++++-------
+ 1 file changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/beeline/src/java/org/apache/hive/beeline/Rows.java b/beeline/src/java/org/apache/hive/beeline/Rows.java
+index cd90268..56c0069 100644
+--- a/beeline/src/java/org/apache/hive/beeline/Rows.java
++++ b/beeline/src/java/org/apache/hive/beeline/Rows.java
+@@ -154,18 +154,22 @@ public String toString(){
+       } catch (Throwable t) {
+       }
+ 
+-      for (int i = 0; i < size; i++) {
++       for (int i = 0; i < size; i++) {
+         Object o = rs.getObject(i + 1);
+-        if(rs.wasNull()) {
+-          values[i] = nullStr;
++        String value = null;
++
++        if (o == null) {
++          value = nullStr;
+         } else if (o instanceof Number) {
+-          values[i] = numberFormat != null ? numberFormat.format(o) : o.toString() ;
++          value = numberFormat != null ? numberFormat.format(o) : o.toString();
+         } else if (o instanceof byte[]) {
+-          values[i] = convertBinaryArray ? new String((byte[])o) : Arrays.toString((byte[])o);
++          value = convertBinaryArray ? new String((byte[])o) : Arrays.toString((byte[])o);
+         } else {
+-          values[i] = o.toString();
++          value = o.toString();
+         }
+-        sizes[i] = values[i].length();
++
++        values[i] = value.intern();
++        sizes[i] = value.length();
+       }
+     }
+   }
+-- 
+1.7.9.5
+

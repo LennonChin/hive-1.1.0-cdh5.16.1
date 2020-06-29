@@ -1,0 +1,61 @@
+From b306e2f81ab62af25cb9d4c594ff608f1744c0db Mon Sep 17 00:00:00 2001
+From: Sergio Pena <sergio.pena@cloudera.com>
+Date: Tue, 23 Oct 2018 09:46:48 -0500
+Subject: [PATCH 1428/1431] CDH-74483: HMS is not adding table type info to
+ notification events
+
+Change-Id: Ic6623b58ec18d4d4cdb2ce310e8c9fc86d93fe39
+---
+ .../hcatalog/listener/DbNotificationListener.java  |   14 +++++++++++---
+ 1 file changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/listener/DbNotificationListener.java b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/listener/DbNotificationListener.java
+index 3c8e344..5bec504 100644
+--- a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/listener/DbNotificationListener.java
++++ b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/listener/DbNotificationListener.java
+@@ -39,6 +39,7 @@
+ import org.apache.hadoop.hive.metastore.api.NotificationEvent;
+ import org.apache.hadoop.hive.metastore.api.Partition;
+ import org.apache.hadoop.hive.metastore.api.Table;
++import org.apache.hadoop.hive.metastore.TableType;
+ import org.apache.hadoop.hive.metastore.events.AddPartitionEvent;
+ import org.apache.hadoop.hive.metastore.events.AlterDatabaseEvent;
+ import org.apache.hadoop.hive.metastore.events.AlterPartitionEvent;
+@@ -157,17 +158,19 @@ public void onAlterTable (AlterTableEvent tableEvent) throws MetaException {
+       return;
+     }
+ 
+-    if (before.getSd() == null || after.getSd() == null) {
++    // Only check for null locations if it is not a view
++    if (!isVirtualView(before) && before.getSd().getLocation() == null) {
+       return;
+     }
+ 
+-    if (before.getSd().getLocation() == null || after.getSd().getLocation() == null) {
++    // Only check for null locations if it is not a view
++    if (!isVirtualView(after) && after.getSd().getLocation() == null) {
+       return;
+     }
+ 
+     if (before.getDbName().equals(after.getDbName()) &&
+         before.getTableName().equals(after.getTableName()) &&
+-        before.getSd().getLocation().equals(after.getSd().getLocation()) &&
++        StringUtils.equals(before.getSd().getLocation(), after.getSd().getLocation()) &&
+         before.getOwnerType() == after.getOwnerType() &&
+         StringUtils.equals(before.getOwner(), after.getOwner())) {
+       // Nothing interesting changed
+@@ -182,6 +185,11 @@ public void onAlterTable (AlterTableEvent tableEvent) throws MetaException {
+     enqueue(event, tableEvent);
+   }
+ 
++  private boolean isVirtualView(Table table) {
++    String tableType = table.getTableType();
++    return tableType != null && tableType.equalsIgnoreCase(TableType.VIRTUAL_VIEW.name());
++  }
++
+   /**
+    * @param partitionEvent partition event
+    * @throws MetaException
+-- 
+1.7.9.5
+

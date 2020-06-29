@@ -1,0 +1,627 @@
+From a1b17b67844a4a6a1db11e48426a049afa53d902 Mon Sep 17 00:00:00 2001
+From: Sergio Pena <sergio.pena@cloudera.com>
+Date: Tue, 5 Jun 2018 07:35:09 -0500
+Subject: [PATCH 1399/1431] CDH-69078: HIVE-18031: Support replication for
+ Alter Database operation (Sankar Hariappan,
+ reviewed by Anishek Agarwal)
+
+This is a partial backport of HIVE-18031 which adds support for replication alter database events. The partial backport just
+adds support for alter database events but it does not add the replication part to avoid api incompatibility.
+
+==C5_FEATURE_FGP==
+
+Change-Id: Ic9d922c226b8a544c8e6f8dd8050702976745915
+---
+ .../apache/hive/hcatalog/common/HCatConstants.java |    1 +
+ .../hcatalog/listener/DbNotificationListener.java  |   16 ++++
+ .../hcatalog/messaging/AlterDatabaseMessage.java   |   36 +++++++++
+ .../hive/hcatalog/messaging/HCatEventMessage.java  |    1 +
+ .../hcatalog/messaging/MessageDeserializer.java    |    8 ++
+ .../hive/hcatalog/messaging/MessageFactory.java    |    9 +++
+ .../messaging/json/JSONAlterDatabaseMessage.java   |   79 ++++++++++++++++++++
+ .../messaging/json/JSONMessageDeserializer.java    |   11 +++
+ .../messaging/json/JSONMessageFactory.java         |   12 +++
+ .../hcatalog/listener/DummyRawStoreFailEvent.java  |    6 +-
+ .../listener/TestDbNotificationListener.java       |   46 ++++++++++++
+ .../hadoop/hive/metastore/HiveMetaStore.java       |   32 +++++++-
+ .../hive/metastore/MetaStoreEventListener.java     |    8 ++
+ .../hive/metastore/MetaStoreListenerNotifier.java  |    8 ++
+ .../hive/metastore/events/AlterDatabaseEvent.java  |   56 ++++++++++++++
+ .../hive/metastore/messaging/EventMessage.java     |    1 +
+ .../hive/metastore/messaging/MessageFactory.java   |    1 +
+ 17 files changed, 327 insertions(+), 4 deletions(-)
+ create mode 100644 hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/AlterDatabaseMessage.java
+ create mode 100644 hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/json/JSONAlterDatabaseMessage.java
+ create mode 100644 metastore/src/java/org/apache/hadoop/hive/metastore/events/AlterDatabaseEvent.java
+
+diff --git a/hcatalog/core/src/main/java/org/apache/hive/hcatalog/common/HCatConstants.java b/hcatalog/core/src/main/java/org/apache/hive/hcatalog/common/HCatConstants.java
+index a6c3391..1cdefd0 100644
+--- a/hcatalog/core/src/main/java/org/apache/hive/hcatalog/common/HCatConstants.java
++++ b/hcatalog/core/src/main/java/org/apache/hive/hcatalog/common/HCatConstants.java
+@@ -152,6 +152,7 @@ private HCatConstants() { // restrict instantiation
+   public static final String HCAT_DROP_TABLE_EVENT = "DROP_TABLE";
+   public static final String HCAT_CREATE_DATABASE_EVENT = "CREATE_DATABASE";
+   public static final String HCAT_DROP_DATABASE_EVENT = "DROP_DATABASE";
++  public static final String HCAT_ALTER_DATABASE_EVENT = "ALTER_DATABASE";
+   public static final String HCAT_CREATE_FUNCTION_EVENT = "CREATE_FUNCTION";
+   public static final String HCAT_DROP_FUNCTION_EVENT = "DROP_FUNCTION";
+   public static final String HCAT_CREATE_INDEX_EVENT = "CREATE_INDEX";
+diff --git a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/listener/DbNotificationListener.java b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/listener/DbNotificationListener.java
+index b84736f..3c8e344 100644
+--- a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/listener/DbNotificationListener.java
++++ b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/listener/DbNotificationListener.java
+@@ -40,6 +40,7 @@
+ import org.apache.hadoop.hive.metastore.api.Partition;
+ import org.apache.hadoop.hive.metastore.api.Table;
+ import org.apache.hadoop.hive.metastore.events.AddPartitionEvent;
++import org.apache.hadoop.hive.metastore.events.AlterDatabaseEvent;
+ import org.apache.hadoop.hive.metastore.events.AlterPartitionEvent;
+ import org.apache.hadoop.hive.metastore.events.AlterTableEvent;
+ import org.apache.hadoop.hive.metastore.events.ConfigChangeEvent;
+@@ -267,6 +268,21 @@ public void onDropDatabase (DropDatabaseEvent dbEvent) throws MetaException {
+   }
+ 
+   /**
++   * @param dbEvent alter database event
++   * @throws MetaException
++   */
++  @Override
++  public void onAlterDatabase(AlterDatabaseEvent dbEvent) throws MetaException {
++    Database oldDb = dbEvent.getOldDatabase();
++    Database newDb = dbEvent.getNewDatabase();
++    NotificationEvent event =
++            new NotificationEvent(0, now(), HCatConstants.HCAT_ALTER_DATABASE_EVENT, msgFactory
++                    .buildAlterDatabaseMessage(oldDb, newDb).toString());
++    event.setDbName(oldDb.getName());
++    enqueue(event, dbEvent);
++  }
++
++  /**
+    * @param fnEvent function event
+    * @throws MetaException
+    */
+diff --git a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/AlterDatabaseMessage.java b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/AlterDatabaseMessage.java
+new file mode 100644
+index 0000000..d21e570
+--- /dev/null
++++ b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/AlterDatabaseMessage.java
+@@ -0,0 +1,36 @@
++/**
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing,
++ * software distributed under the License is distributed on an
++ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++ * KIND, either express or implied.  See the License for the
++ * specific language governing permissions and limitations
++ * under the License.
++ */
++
++package org.apache.hive.hcatalog.messaging;
++
++import org.apache.hadoop.hive.common.classification.InterfaceAudience;
++import org.apache.hadoop.hive.common.classification.InterfaceStability;
++
++/**
++ * AlterDatabaseMessage.
++ * Abstract class to store the Alter database message
++ */
++@InterfaceAudience.Public
++@InterfaceStability.Stable
++public abstract class AlterDatabaseMessage extends HCatEventMessage {
++
++  protected AlterDatabaseMessage() {
++    super(EventType.ALTER_DATABASE);
++  }
++}
+diff --git a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/HCatEventMessage.java b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/HCatEventMessage.java
+index dfeaee7..4a19306 100644
+--- a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/HCatEventMessage.java
++++ b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/HCatEventMessage.java
+@@ -43,6 +43,7 @@
+     ADD_PARTITION(HCatConstants.HCAT_ADD_PARTITION_EVENT),
+     DROP_PARTITION(HCatConstants.HCAT_DROP_PARTITION_EVENT),
+     ALTER_TABLE(HCatConstants.HCAT_ALTER_TABLE_EVENT),
++    ALTER_DATABASE(HCatConstants.HCAT_ALTER_DATABASE_EVENT),
+     ALTER_PARTITION(HCatConstants.HCAT_ALTER_PARTITION_EVENT),
+     INSERT(HCatConstants.HCAT_INSERT_EVENT),
+     CREATE_FUNCTION(HCatConstants.HCAT_CREATE_FUNCTION_EVENT),
+diff --git a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/MessageDeserializer.java b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/MessageDeserializer.java
+index 2a7b9ae..740a163 100644
+--- a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/MessageDeserializer.java
++++ b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/MessageDeserializer.java
+@@ -39,6 +39,8 @@ public HCatEventMessage getHCatEventMessage(String eventTypeString, String messa
+     switch (HCatEventMessage.EventType.valueOf(eventTypeString)) {
+     case CREATE_DATABASE:
+       return getCreateDatabaseMessage(messageBody);
++    case ALTER_DATABASE:
++      return getAlterDatabaseMessage(messageBody);
+     case DROP_DATABASE:
+       return getDropDatabaseMessage(messageBody);
+     case CREATE_TABLE:
+@@ -76,6 +78,12 @@ public HCatEventMessage getHCatEventMessage(String eventTypeString, String messa
+   public abstract CreateDatabaseMessage getCreateDatabaseMessage(String messageBody);
+ 
+   /**
++   * Method to de-serialize AlterDatabaseMessage instance.
++   */
++  public abstract AlterDatabaseMessage getAlterDatabaseMessage(String messageBody);
++
++
++  /**
+    * Method to de-serialize DropDatabaseMessage instance.
+    */
+   public abstract DropDatabaseMessage getDropDatabaseMessage(String messageBody);
+diff --git a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/MessageFactory.java b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/MessageFactory.java
+index 50dba12..77a0e0b 100644
+--- a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/MessageFactory.java
++++ b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/MessageFactory.java
+@@ -110,6 +110,15 @@ public static MessageDeserializer getDeserializer(String format,
+   public abstract CreateDatabaseMessage buildCreateDatabaseMessage(Database db);
+ 
+   /**
++   * Factory method for AlterDatabaseMessage.
++   * @param beforeDb The Database before alter.
++   * @param afterDb The Database after alter.
++   * @return AlterDatabaseMessage instance.
++   */
++  public abstract AlterDatabaseMessage buildAlterDatabaseMessage(Database beforeDb, Database afterDb);
++
++
++  /**
+    * Factory method for DropDatabaseMessage.
+    * @param db The Database being dropped.
+    * @return DropDatabaseMessage instance.
+diff --git a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/json/JSONAlterDatabaseMessage.java b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/json/JSONAlterDatabaseMessage.java
+new file mode 100644
+index 0000000..6723ba4
+--- /dev/null
++++ b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/json/JSONAlterDatabaseMessage.java
+@@ -0,0 +1,79 @@
++/**
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing,
++ * software distributed under the License is distributed on an
++ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++ * KIND, either express or implied.  See the License for the
++ * specific language governing permissions and limitations
++ * under the License.
++ */
++package org.apache.hive.hcatalog.messaging.json;
++
++import org.apache.hadoop.hive.metastore.api.Database;
++import org.apache.hive.hcatalog.messaging.AlterDatabaseMessage;
++import org.codehaus.jackson.annotate.JsonProperty;
++
++/**
++ * JSON alter database message.
++ */
++public class JSONAlterDatabaseMessage extends AlterDatabaseMessage {
++
++  @JsonProperty
++  String server, servicePrincipal, db;
++
++  @JsonProperty
++  Long timestamp;
++
++  /**
++   * Default constructor, needed for Jackson.
++   */
++  public JSONAlterDatabaseMessage() {
++  }
++
++  public JSONAlterDatabaseMessage(String server, String servicePrincipal,
++                                  Database dbObjBefore, Database dbObjAfter, Long timestamp) {
++    this.server = server;
++    this.servicePrincipal = servicePrincipal;
++    this.db = dbObjBefore.getName();
++    this.timestamp = timestamp;
++    checkValid();
++  }
++
++  @Override
++  public String getServer() {
++    return server;
++  }
++
++  @Override
++  public String getServicePrincipal() {
++    return servicePrincipal;
++  }
++
++  @Override
++  public String getDB() {
++    return db;
++  }
++
++  @Override
++  public Long getTimestamp() {
++    return timestamp;
++  }
++
++  @Override
++  public String toString() {
++    try {
++      return JSONMessageDeserializer.mapper.writeValueAsString(this);
++    } catch (Exception e) {
++      throw new IllegalArgumentException("Could not serialize: ", e);
++    }
++  }
++}
+diff --git a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/json/JSONMessageDeserializer.java b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/json/JSONMessageDeserializer.java
+index bd45d09..cf466a0 100644
+--- a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/json/JSONMessageDeserializer.java
++++ b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/json/JSONMessageDeserializer.java
+@@ -19,6 +19,7 @@
+ 
+ package org.apache.hive.hcatalog.messaging.json;
+ 
++import org.apache.hive.hcatalog.messaging.AlterDatabaseMessage;
+ import org.apache.hive.hcatalog.messaging.AddPartitionMessage;
+ import org.apache.hive.hcatalog.messaging.AlterIndexMessage;
+ import org.apache.hive.hcatalog.messaging.AlterPartitionMessage;
+@@ -59,6 +60,16 @@ public CreateDatabaseMessage getCreateDatabaseMessage(String messageBody) {
+   }
+ 
+   @Override
++  public AlterDatabaseMessage getAlterDatabaseMessage(String messageBody) {
++    try {
++      return mapper.readValue(messageBody, JSONAlterDatabaseMessage.class);
++    } catch (Exception exception) {
++      throw new IllegalArgumentException("Could not construct JSONAlterDatabaseMessage.",
++          exception);
++    }
++  }
++
++  @Override
+   public DropDatabaseMessage getDropDatabaseMessage(String messageBody) {
+     try {
+       return mapper.readValue(messageBody, JSONDropDatabaseMessage.class);
+diff --git a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/json/JSONMessageFactory.java b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/json/JSONMessageFactory.java
+index 06ba0eb..8451489 100644
+--- a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/json/JSONMessageFactory.java
++++ b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/messaging/json/JSONMessageFactory.java
+@@ -29,6 +29,7 @@
+ import org.apache.hadoop.hive.metastore.api.Partition;
+ import org.apache.hadoop.hive.metastore.api.Table;
+ import org.apache.hadoop.hive.metastore.partition.spec.PartitionSpecProxy;
++import org.apache.hive.hcatalog.messaging.AlterDatabaseMessage;
+ import org.apache.hive.hcatalog.messaging.AlterIndexMessage;
+ import org.apache.hive.hcatalog.messaging.CreateFunctionMessage;
+ import org.apache.hive.hcatalog.messaging.CreateIndexMessage;
+@@ -87,6 +88,12 @@ public CreateDatabaseMessage buildCreateDatabaseMessage(Database db) {
+   }
+ 
+   @Override
++  public AlterDatabaseMessage buildAlterDatabaseMessage(Database beforeDb, Database afterDb) {
++    return new JSONAlterDatabaseMessage(HCAT_SERVER_URL, HCAT_SERVICE_PRINCIPAL,
++        beforeDb, afterDb, now());
++  }
++
++  @Override
+   public DropDatabaseMessage buildDropDatabaseMessage(Database db) {
+     return new JSONDropDatabaseMessage(HCAT_SERVER_URL, HCAT_SERVICE_PRINCIPAL, db.getName(),
+         now());
+@@ -204,6 +211,11 @@ private long now() {
+     return partitionList;
+   }
+ 
++  static String createDatabaseObjJson(Database dbObj) throws TException {
++    TSerializer serializer = new TSerializer(new TJSONProtocol.Factory());
++    return serializer.toString(dbObj, "UTF-8");
++  }
++
+   static String createFunctionObjJson(Function functionObj) throws TException {
+     TSerializer serializer = new TSerializer(new TJSONProtocol.Factory());
+     return serializer.toString(functionObj, "UTF-8");
+diff --git a/itests/hcatalog-unit/src/test/java/org/apache/hive/hcatalog/listener/DummyRawStoreFailEvent.java b/itests/hcatalog-unit/src/test/java/org/apache/hive/hcatalog/listener/DummyRawStoreFailEvent.java
+index 72cf7c4..202bfaf 100644
+--- a/itests/hcatalog-unit/src/test/java/org/apache/hive/hcatalog/listener/DummyRawStoreFailEvent.java
++++ b/itests/hcatalog-unit/src/test/java/org/apache/hive/hcatalog/listener/DummyRawStoreFailEvent.java
+@@ -149,7 +149,11 @@ public boolean dropDatabase(String dbName)
+   @Override
+   public boolean alterDatabase(String dbName, Database db)
+       throws NoSuchObjectException, MetaException {
+-    return objectStore.alterDatabase(dbName, db);
++    if (shouldEventSucceed) {
++      return objectStore.alterDatabase(dbName, db);
++    } else {
++      throw new RuntimeException("Event failed.");
++    }
+   }
+ 
+   @Override
+diff --git a/itests/hcatalog-unit/src/test/java/org/apache/hive/hcatalog/listener/TestDbNotificationListener.java b/itests/hcatalog-unit/src/test/java/org/apache/hive/hcatalog/listener/TestDbNotificationListener.java
+index 30a1d81..4ce438d 100644
+--- a/itests/hcatalog-unit/src/test/java/org/apache/hive/hcatalog/listener/TestDbNotificationListener.java
++++ b/itests/hcatalog-unit/src/test/java/org/apache/hive/hcatalog/listener/TestDbNotificationListener.java
+@@ -70,6 +70,7 @@
+ import org.apache.hadoop.hive.ql.Driver;
+ import org.apache.hadoop.hive.ql.session.SessionState;
+ import org.apache.hive.hcatalog.common.HCatConstants;
++import org.apache.hadoop.hive.metastore.events.AlterDatabaseEvent;
+ import org.apache.hadoop.hive.metastore.events.AddIndexEvent;
+ import org.apache.hadoop.hive.metastore.events.AddPartitionEvent;
+ import org.apache.hadoop.hive.metastore.events.AlterIndexEvent;
+@@ -171,6 +172,10 @@ public void onDropDatabase (DropDatabaseEvent dbEvent) throws MetaException {
+       pushEventId(EventType.DROP_DATABASE, dbEvent);
+     }
+ 
++    public void onAlterDatabase (AlterDatabaseEvent dbEvent) throws MetaException {
++      pushEventId(EventType.ALTER_DATABASE, dbEvent);
++    }
++
+     public void onAddIndex(AddIndexEvent indexEvent) throws MetaException {
+       pushEventId(EventType.CREATE_INDEX, indexEvent);
+     }
+@@ -338,6 +343,47 @@ public void createTable() throws Exception {
+   }
+ 
+   @Test
++  public void alterDatabase() throws Exception {
++    String dbName = "alterdatabase";
++    Database db =
++        new Database(dbName, "", "file:/tmp/alterdatabase", null);
++    db.setOwnerName("me");
++
++    // Event 1
++    msClient.createDatabase(db);
++
++    // Event 2
++    db.setOwnerName("you");
++    db.setLocationUri("file:/tmp/alterdatabase_copy");
++    msClient.alterDatabase(dbName, db);
++
++    // Get notifications from metastore
++    NotificationEventResponse rsp = msClient.getNextNotification(firstEventId, 0, null);
++    assertEquals(2, rsp.getEventsSize());
++    NotificationEvent event = rsp.getEvents().get(1);
++    assertEquals(firstEventId + 2, event.getEventId());
++    assertTrue(event.getEventTime() >= startTime);
++    assertEquals(HCatConstants.HCAT_ALTER_DATABASE_EVENT, event.getEventType());
++    assertEquals(dbName, event.getDbName());
++
++    // Verify the eventID was passed to the non-transactional listener
++    MockMetaStoreEventListener.popAndVerifyLastEventId(EventType.ALTER_DATABASE, firstEventId + 2);
++    MockMetaStoreEventListener.popAndVerifyLastEventId(EventType.CREATE_DATABASE, firstEventId + 1);
++
++    // When hive.metastore.transactional.event.listeners is set,
++    // a failed event should not create a new notification
++    DummyRawStoreFailEvent.setEventSucceed(false);
++    try {
++      msClient.alterDatabase(dbName, db);
++      fail("Error: alter database should've failed");
++    } catch (Exception ex) {
++      // expected
++    }
++    rsp = msClient.getNextNotification(firstEventId, 0, null);
++    assertEquals(2, rsp.getEventsSize());
++  }
++
++  @Test
+   public void alterTable() throws Exception {
+     List<FieldSchema> cols = new ArrayList<FieldSchema>();
+     cols.add(new FieldSchema("col1", "int", "nocomment"));
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java b/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java
+index c5d0a6a..539514a 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java
+@@ -141,6 +141,7 @@
+ import org.apache.hadoop.hive.metastore.api.UnknownTableException;
+ import org.apache.hadoop.hive.metastore.api.UnlockRequest;
+ import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
++import org.apache.hadoop.hive.metastore.events.AlterDatabaseEvent;
+ import org.apache.hadoop.hive.metastore.events.AddIndexEvent;
+ import org.apache.hadoop.hive.metastore.events.AddPartitionEvent;
+ import org.apache.hadoop.hive.metastore.events.AlterIndexEvent;
+@@ -1059,6 +1060,9 @@ public void alter_database(final String dbName, final Database newDB)
+       startFunction("alter_database" + dbName);
+       boolean success = false;
+       Exception ex = null;
++      RawStore ms = getMS();
++      Database oldDB = null;
++      Map<String, String> transactionalListenersResponses = Collections.emptyMap();
+ 
+       // Perform the same URI normalization as create_database_core.
+       if (newDB.getLocationUri() != null) {
+@@ -1066,17 +1070,39 @@ public void alter_database(final String dbName, final Database newDB)
+       }
+ 
+       try {
+-        Database oldDB = get_database_core(dbName);
++        oldDB = get_database_core(dbName);
+         if (oldDB == null) {
+           throw new MetaException("Could not alter database \"" + dbName + "\". Could not retrieve old definition.");
+         }
+         firePreEvent(new PreAlterDatabaseEvent(oldDB, newDB, this));
+-        getMS().alterDatabase(dbName, newDB);
+-        success = true;
++
++        ms.openTransaction();
++        ms.alterDatabase(dbName, newDB);
++
++        if (!transactionalListeners.isEmpty()) {
++          transactionalListenersResponses =
++                  MetaStoreListenerNotifier.notifyEvent(transactionalListeners,
++                          EventType.ALTER_DATABASE,
++                          new AlterDatabaseEvent(oldDB, newDB, true, this));
++        }
++
++        success = ms.commitTransaction();
+       } catch (Exception e) {
+         ex = e;
+         rethrowException(e);
+       } finally {
++        if (!success) {
++          ms.rollbackTransaction();
++        }
++
++        if ((null != oldDB) && (!listeners.isEmpty())) {
++          MetaStoreListenerNotifier.notifyEvent(listeners,
++                  EventType.ALTER_DATABASE,
++                  new AlterDatabaseEvent(oldDB, newDB, success, this),
++                  null,
++                  transactionalListenersResponses, ms);
++        }
++
+         endFunction("alter_database", success, ex);
+       }
+     }
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreEventListener.java b/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreEventListener.java
+index 1274370..006226a 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreEventListener.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreEventListener.java
+@@ -23,6 +23,7 @@
+ import org.apache.hadoop.hive.common.classification.InterfaceAudience;
+ import org.apache.hadoop.hive.common.classification.InterfaceStability;
+ import org.apache.hadoop.hive.metastore.api.MetaException;
++import org.apache.hadoop.hive.metastore.events.AlterDatabaseEvent;
+ import org.apache.hadoop.hive.metastore.events.AddIndexEvent;
+ import org.apache.hadoop.hive.metastore.events.AlterIndexEvent;
+ import org.apache.hadoop.hive.metastore.events.AddPartitionEvent;
+@@ -122,6 +123,13 @@ public void onDropDatabase (DropDatabaseEvent dbEvent) throws MetaException {
+   }
+ 
+   /**
++   * @param dbEvent alter database event
++   * @throws MetaException
++   */
++  public void onAlterDatabase(AlterDatabaseEvent dbEvent) throws MetaException {
++  }
++
++  /**
+    * @param partSetDoneEvent
+    * @throws MetaException
+    */
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreListenerNotifier.java b/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreListenerNotifier.java
+index 37327f8..432d8ef 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreListenerNotifier.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreListenerNotifier.java
+@@ -26,6 +26,7 @@
+ import org.apache.hadoop.hive.metastore.api.MetaException;
+ import org.apache.hadoop.hive.metastore.events.AddIndexEvent;
+ import org.apache.hadoop.hive.metastore.events.AddPartitionEvent;
++import org.apache.hadoop.hive.metastore.events.AlterDatabaseEvent;
+ import org.apache.hadoop.hive.metastore.events.AlterIndexEvent;
+ import org.apache.hadoop.hive.metastore.events.AlterPartitionEvent;
+ import org.apache.hadoop.hive.metastore.events.AlterTableEvent;
+@@ -93,6 +94,13 @@ public void notify(MetaStoreEventListener listener, ListenerEvent event) throws
+               listener.onDropPartition((DropPartitionEvent)event);
+             }
+           })
++          .put(EventType.ALTER_DATABASE, new EventNotifier() {
++            @Override
++            public void notify(MetaStoreEventListener listener,
++                               ListenerEvent event) throws MetaException {
++              listener.onAlterDatabase((AlterDatabaseEvent)event);
++            }
++          })
+           .put(EventType.ALTER_TABLE, new EventNotifier() {
+             @Override
+             public void notify(MetaStoreEventListener listener, ListenerEvent event) throws MetaException {
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/events/AlterDatabaseEvent.java b/metastore/src/java/org/apache/hadoop/hive/metastore/events/AlterDatabaseEvent.java
+new file mode 100644
+index 0000000..91dff76
+--- /dev/null
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/events/AlterDatabaseEvent.java
+@@ -0,0 +1,56 @@
++/**
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.hadoop.hive.metastore.events;
++
++import org.apache.hadoop.classification.InterfaceAudience;
++import org.apache.hadoop.classification.InterfaceStability;
++import org.apache.hadoop.hive.metastore.HiveMetaStore.HMSHandler;
++import org.apache.hadoop.hive.metastore.api.Database;
++
++/**
++ * AlterDatabaseEvent.
++ * Event which is captured during database alters for owner info or properties or location
++ */
++@InterfaceAudience.Public
++@InterfaceStability.Stable
++public class AlterDatabaseEvent extends ListenerEvent {
++
++  private final Database oldDb;
++  private final Database newDb;
++
++  public AlterDatabaseEvent(Database oldDb, Database newDb, boolean status, HMSHandler handler) {
++    super(status, handler);
++    this.oldDb = oldDb;
++    this.newDb = newDb;
++  }
++
++  /**
++   * @return the old db
++   */
++  public Database getOldDatabase() {
++    return oldDb;
++  }
++
++  /**
++   * @return the new db
++   */
++  public Database getNewDatabase() {
++    return newDb;
++  }
++}
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/messaging/EventMessage.java b/metastore/src/java/org/apache/hadoop/hive/metastore/messaging/EventMessage.java
+index b49ba10..4f8cd89 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/messaging/EventMessage.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/messaging/EventMessage.java
+@@ -37,6 +37,7 @@
+     ADD_PARTITION(MessageFactory.ADD_PARTITION_EVENT),
+     DROP_PARTITION(MessageFactory.DROP_PARTITION_EVENT),
+     ALTER_TABLE(MessageFactory.ALTER_TABLE_EVENT),
++    ALTER_DATABASE(MessageFactory.ALTER_DATABASE_EVENT),
+     ALTER_PARTITION(MessageFactory.ALTER_PARTITION_EVENT),
+     INSERT(MessageFactory.INSERT_EVENT),
+     CREATE_FUNCTION(MessageFactory.CREATE_FUNCTION_EVENT),
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/messaging/MessageFactory.java b/metastore/src/java/org/apache/hadoop/hive/metastore/messaging/MessageFactory.java
+index d12634d..6f8da52 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/messaging/MessageFactory.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/messaging/MessageFactory.java
+@@ -32,6 +32,7 @@
+   public static final String ALTER_TABLE_EVENT = "ALTER_TABLE";
+   public static final String DROP_TABLE_EVENT = "DROP_TABLE";
+   public static final String CREATE_DATABASE_EVENT = "CREATE_DATABASE";
++  public static final String ALTER_DATABASE_EVENT = "ALTER_DATABASE";
+   public static final String DROP_DATABASE_EVENT = "DROP_DATABASE";
+   public static final String INSERT_EVENT = "INSERT";
+   public static final String CREATE_FUNCTION_EVENT = "CREATE_FUNCTION";
+-- 
+1.7.9.5
+

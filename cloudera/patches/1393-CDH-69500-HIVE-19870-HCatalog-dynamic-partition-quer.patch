@@ -1,0 +1,156 @@
+From 383fc47bfca2e9afff65f8756745fc5628084612 Mon Sep 17 00:00:00 2001
+From: Peter Vary <pvary@cloudera.com>
+Date: Tue, 19 Jun 2018 09:54:19 +0200
+Subject: [PATCH 1393/1431] CDH-69500: HIVE-19870: HCatalog dynamic partition
+ query can fail, if the table path is managed by
+ Sentry (Peter Vary via Marta Kuczora)
+
+(cherry picked from commit 2394e409f87b3a857cc00d9041b354cd47c9a923)
+
+Change-Id: Ic5015550c9c74146c0dc39c5dcb8e15335d6d3e2
+(cherry picked from commit 66b64a53c44bb2986a60d33f02c5b9c0e704930c)
+---
+ .../mapreduce/FileOutputCommitterContainer.java    |   60 ++++++--------------
+ 1 file changed, 18 insertions(+), 42 deletions(-)
+
+diff --git a/hcatalog/core/src/main/java/org/apache/hive/hcatalog/mapreduce/FileOutputCommitterContainer.java b/hcatalog/core/src/main/java/org/apache/hive/hcatalog/mapreduce/FileOutputCommitterContainer.java
+index bf2ba5a..02ec1a9 100644
+--- a/hcatalog/core/src/main/java/org/apache/hive/hcatalog/mapreduce/FileOutputCommitterContainer.java
++++ b/hcatalog/core/src/main/java/org/apache/hive/hcatalog/mapreduce/FileOutputCommitterContainer.java
+@@ -32,7 +32,6 @@
+ import org.apache.hadoop.fs.FileStatus;
+ import org.apache.hadoop.fs.FileSystem;
+ import org.apache.hadoop.fs.Path;
+-import org.apache.hadoop.fs.permission.FsPermission;
+ import org.apache.hadoop.hive.common.FileUtils;
+ import org.apache.hadoop.hive.conf.HiveConf;
+ import org.apache.hadoop.hive.metastore.MetaStoreUtils;
+@@ -46,6 +45,7 @@
+ import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
+ import org.apache.hadoop.hive.metastore.Warehouse;
+ import org.apache.hadoop.hive.ql.metadata.Table;
++import org.apache.hadoop.hive.shims.HadoopShims;
+ import org.apache.hadoop.hive.shims.ShimLoader;
+ import org.apache.hadoop.mapred.JobConf;
+ import org.apache.hadoop.mapreduce.JobContext;
+@@ -320,18 +320,18 @@ private String getPartitionRootLocation(String ptnLocn, int numPtnKeys) {
+    * @param params The parameters to store inside the partition
+    * @param table The Table metadata object under which this Partition will reside
+    * @param fs FileSystem object to operate on the underlying filesystem
+-   * @param grpName Group name that owns the table dir
+-   * @param perms FsPermission that's the default permission of the table dir.
++   * @param conf HiveConf used to access FS
++   * @param status Permission that's the default permission of the table dir.
+    * @return Constructed Partition metadata object
+    * @throws java.io.IOException
+    */
+ 
+   private Partition constructPartition(
+-    JobContext context, OutputJobInfo jobInfo,
+-    String partLocnRoot, String dynPartPath, Map<String, String> partKVs,
+-    HCatSchema outputSchema, Map<String, String> params,
+-    Table table, FileSystem fs,
+-    String grpName, FsPermission perms) throws IOException {
++      JobContext context, OutputJobInfo jobInfo,
++      String partLocnRoot, String dynPartPath, Map<String, String> partKVs,
++      HCatSchema outputSchema, Map<String, String> params,
++      Table table, FileSystem fs, HiveConf conf,
++      HadoopShims.HdfsFileStatus status) throws IOException {
+ 
+     Partition partition = new Partition();
+     partition.setDbName(table.getDbName());
+@@ -368,18 +368,16 @@ private Partition constructPartition(
+       for (FieldSchema partKey : table.getPartitionKeys()) {
+         if (i++ != 0) {
+           fs.mkdirs(partPath); // Attempt to make the path in case it does not exist before we check
+-          applyGroupAndPerms(fs, partPath, perms, grpName, false);
++          ShimLoader.getHadoopShims().setFullFileStatus(conf, status, status.getFileStatus().getGroup(), fs,
++              partPath, false);
+         }
+         partPath = constructPartialPartPath(partPath, partKey.getName().toLowerCase(), partKVs);
+       }
+     }
+ 
+-    // Apply the group and permissions to the leaf partition and files.
+-    // Need not bother in case of HDFS as permission is taken care of by setting UMask
+-    fs.mkdirs(partPath); // Attempt to make the path in case it does not exist before we check
+-    if (!ShimLoader.getHadoopShims().getHCatShim().isFileInHDFS(fs, partPath)) {
+-      applyGroupAndPerms(fs, partPath, perms, grpName, true);
+-    }
++    // Do not need to set the status on the partition directory. We will do it later recursively.
++    // See: end of the registerPartitions method
++    fs.mkdirs(partPath);
+ 
+     // Set the location in the StorageDescriptor
+     if (dynamicPartitioningUsed) {
+@@ -397,26 +395,6 @@ private Partition constructPartition(
+     return partition;
+   }
+ 
+-  private void applyGroupAndPerms(FileSystem fs, Path dir, FsPermission permission,
+-                  String group, boolean recursive)
+-    throws IOException {
+-    if(LOG.isDebugEnabled()) {
+-      LOG.debug("applyGroupAndPerms : " + dir +
+-          " perms: " + permission +
+-          " group: " + group + " recursive: " + recursive);
+-    }
+-    fs.setPermission(dir, permission);
+-    if (recursive) {
+-      for (FileStatus fileStatus : fs.listStatus(dir)) {
+-        if (fileStatus.isDir()) {
+-          applyGroupAndPerms(fs, fileStatus.getPath(), permission, group, true);
+-        } else {
+-          fs.setPermission(fileStatus.getPath(), permission);
+-        }
+-      }
+-    }
+-  }
+-
+   private String getFinalDynamicPartitionDestination(Table table, Map<String, String> partKVs,
+       OutputJobInfo jobInfo) {
+     Path partPath = new Path(table.getTTable().getSd().getLocation());
+@@ -786,9 +764,7 @@ private void registerPartitions(JobContext context) throws IOException{
+       client = HCatUtil.getHiveClient(hiveConf);
+       StorerInfo storer = InternalUtil.extractStorerInfo(table.getTTable().getSd(),table.getParameters());
+ 
+-      FileStatus tblStat = fs.getFileStatus(tblPath);
+-      String grpName = tblStat.getGroup();
+-      FsPermission perms = tblStat.getPermission();
++      HadoopShims.HdfsFileStatus status = ShimLoader.getHadoopShims().getFullFileStatus(conf, fs, tblPath);
+ 
+       List<Partition> partitionsToAdd = new ArrayList<Partition>();
+       if (!dynamicPartitioningUsed){
+@@ -798,7 +774,7 @@ private void registerPartitions(JobContext context) throws IOException{
+                 tblPath.toString(), null, jobInfo.getPartitionValues()
+                 ,jobInfo.getOutputSchema(), getStorerParameterMap(storer)
+                 ,table, fs
+-                ,grpName,perms));
++                ,hiveConf, status));
+       }else{
+         for (Entry<String,Map<String,String>> entry : partitionsDiscoveredByPath.entrySet()){
+           partitionsToAdd.add(
+@@ -808,7 +784,7 @@ private void registerPartitions(JobContext context) throws IOException{
+                   ,entry.getKey(), entry.getValue()
+                   ,jobInfo.getOutputSchema(), getStorerParameterMap(storer)
+                   ,table, fs
+-                  ,grpName,perms));
++                  ,hiveConf, status));
+         }
+       }
+ 
+@@ -944,9 +920,9 @@ private void registerPartitions(JobContext context) throws IOException{
+         // Set permissions appropriately for each of the partitions we just created
+         // so as to have their permissions mimic the table permissions
+         for (Partition p : partitionsAdded){
+-          applyGroupAndPerms(fs,new Path(p.getSd().getLocation()),tblStat.getPermission(),tblStat.getGroup(),true);
++          ShimLoader.getHadoopShims().setFullFileStatus(conf, status, status.getFileStatus().getGroup(), fs,
++              new Path(p.getSd().getLocation()), true);
+         }
+-
+       }
+     } catch (Exception e) {
+       if (partitionsAdded.size() > 0) {
+-- 
+1.7.9.5
+

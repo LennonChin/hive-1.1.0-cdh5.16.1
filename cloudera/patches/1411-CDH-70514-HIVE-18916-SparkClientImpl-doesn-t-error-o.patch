@@ -1,0 +1,185 @@
+From ff2c17f1a554899e9a36e475ec96a7613851299f Mon Sep 17 00:00:00 2001
+From: Sahil Takiar <takiar.sahil@gmail.com>
+Date: Mon, 2 Jul 2018 11:30:14 -0700
+Subject: [PATCH 1411/1431] CDH-70514: HIVE-18916: SparkClientImpl doesn't
+ error out if spark-submit fails (Sahil Takiar,
+ reviewed by Aihua Xu)
+
+==C5_APPROVED_BUGFIX==
+
+(cherry picked from commit 5373fdaab47d21b8d984a3dfaaded72d1e40497f)
+(cherry picked from commit e19b861cfbcb15166f9255f8b375ff5d8056b417)
+
+This is only a partial backport, since we aren't able to backport
+HIVE-18831 only part of this patch could be backported. All the unit
+tests that were added as part of this patch were not backported
+either.
+
+Conflicts:
+	itests/src/test/resources/testconfiguration.properties
+	itests/util/src/main/java/org/apache/hadoop/hive/cli/control/CliConfigs.java
+	itests/util/src/main/java/org/apache/hadoop/hive/ql/QTestUtil.java
+	ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkTask.java
+	ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionImpl.java
+	ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java
+	spark-client/src/main/java/org/apache/hive/spark/client/SparkClientImpl.java
+	spark-client/src/main/java/org/apache/hive/spark/client/rpc/RpcServer.java
+
+Change-Id: Id7eb49ab98920dc39cdf8b15fd25e82f49c604c3
+---
+ .../hadoop/hive/ql/exec/spark/SparkTask.java       |   13 ++++--------
+ .../ql/exec/spark/session/SparkSessionImpl.java    |   10 ++++++++--
+ .../exec/spark/status/RemoteSparkJobMonitor.java   |    2 --
+ .../apache/hive/spark/client/SparkClientImpl.java  |   16 +++++++--------
+ .../apache/hive/spark/client/rpc/RpcServer.java    |   21 +++++++++++++++-----
+ 5 files changed, 36 insertions(+), 26 deletions(-)
+
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkTask.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkTask.java
+index 5aea2f6..ad4bb54 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkTask.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkTask.java
+@@ -130,12 +130,7 @@ public int execute(DriverContext driverContext) {
+       }
+       sparkJobStatus.cleanup();
+     } catch (Exception e) {
+-      String msg = "Failed to execute spark task, with exception '" + Utilities.getNameMessage(e) + "'";
+-
+-      // Has to use full name to make sure it does not conflict with
+-      // org.apache.commons.lang.StringUtils
+-      console.printError(msg, "\n" + org.apache.hadoop.util.StringUtils.stringifyException(e));
+-      LOG.error(msg, e);
++      LOG.error("Failed to execute Spark task \"" + getId() + "\"", e);
+       setException(e);
+       if (e instanceof HiveException) {
+         HiveException he = (HiveException) e;
+@@ -460,9 +455,9 @@ private boolean isOOMError(Throwable error) {
+     while (error != null) {
+       if (error instanceof OutOfMemoryError) {
+         return true;
+-      } else if (error instanceof SparkException) {
+-        String sts = Throwables.getStackTraceAsString(error);
+-        return sts.contains("Container killed by YARN for exceeding memory limits");
++      } else if (error.getMessage() != null && error.getMessage().contains("Container killed by " +
++              "YARN for exceeding memory limits")) {
++        return true;
+       }
+       error = error.getCause();
+     }
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionImpl.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionImpl.java
+index 73e95bd..b88489e 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionImpl.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/session/SparkSessionImpl.java
+@@ -208,13 +208,19 @@ HiveException getHiveException(Throwable e) {
+           return new HiveException(e, ErrorMsg.SPARK_CREATE_CLIENT_INVALID_RESOURCE_REQUEST,
+               matchedString);
+         } else {
+-          return new HiveException(e, ErrorMsg.SPARK_CREATE_CLIENT_ERROR, sessionId);
++          return new HiveException(e, ErrorMsg.SPARK_CREATE_CLIENT_ERROR, sessionId,
++                  getRootCause(oe));
+         }
+       }
+       e = e.getCause();
+     }
+ 
+-    return new HiveException(oe, ErrorMsg.SPARK_CREATE_CLIENT_ERROR, sessionId);
++    return new HiveException(oe, ErrorMsg.SPARK_CREATE_CLIENT_ERROR, sessionId, getRootCause(oe));
++  }
++
++  private String getRootCause(Throwable e) {
++    Throwable rootCause = Throwables.getRootCause(e);
++    return rootCause.getClass().getName() + ": " + rootCause.getMessage();
+   }
+ 
+   @VisibleForTesting
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java
+index db4a3a3..65ffc53 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java
+@@ -71,8 +71,6 @@ public int startMonitor() {
+           if ((timeCount > monitorTimeoutInteval)) {
+             HiveException he = new HiveException(ErrorMsg.SPARK_JOB_MONITOR_TIMEOUT,
+                 Long.toString(timeCount));
+-            console.printError(he.getMessage());
+-            console.printError("Status: " + state);
+             sparkJobStatus.setError(he);
+             running = false;
+             done = true;
+diff --git a/spark-client/src/main/java/org/apache/hive/spark/client/SparkClientImpl.java b/spark-client/src/main/java/org/apache/hive/spark/client/SparkClientImpl.java
+index 1e92fae..8128106 100644
+--- a/spark-client/src/main/java/org/apache/hive/spark/client/SparkClientImpl.java
++++ b/spark-client/src/main/java/org/apache/hive/spark/client/SparkClientImpl.java
+@@ -490,18 +490,18 @@ public void run() {
+           try {
+             int exitCode = child.waitFor();
+             if (exitCode != 0) {
+-              StringBuilder errStr = new StringBuilder();
++              List<String> errorMessages = new ArrayList<>();
+               synchronized(childErrorLog) {
+-                Iterator iter = childErrorLog.iterator();
+-                while(iter.hasNext()){
+-                  errStr.append(iter.next());
+-                  errStr.append('\n');
++                for (String line : childErrorLog) {
++                  if (StringUtils.containsIgnoreCase(line, "Error")) {
++                    errorMessages.add("\"" + line + "\"");
++                  }
+                 }
+               }
+ 
+-              LOG.warn("Child process exited with code {}", exitCode);
+-              rpcServer.cancelClient(clientId,
+-                  "Child process (spark-submit) exited before connecting back with error log " + errStr.toString());
++              String errStr = errorMessages.isEmpty() ? "?" : Joiner.on(',').join(errorMessages);
++              rpcServer.cancelClient(clientId, new RuntimeException("spark-submit process failed " +
++	                  "with exit code " + exitCode + " and error " + errStr));
+             }
+           } catch (InterruptedException ie) {
+             LOG.warn("Thread waiting on the child process (spark-submit) is interrupted, killing the child process.");
+diff --git a/spark-client/src/main/java/org/apache/hive/spark/client/rpc/RpcServer.java b/spark-client/src/main/java/org/apache/hive/spark/client/rpc/RpcServer.java
+index d3f295f..52f9a07 100644
+--- a/spark-client/src/main/java/org/apache/hive/spark/client/rpc/RpcServer.java
++++ b/spark-client/src/main/java/org/apache/hive/spark/client/rpc/RpcServer.java
+@@ -195,11 +195,12 @@ public void operationComplete(Promise<Rpc> p) {
+   }
+ 
+   /**
+-   * Tells the RPC server to cancel the connection from an existing pending client
++   * Tells the RPC server to cancel the connection from an existing pending client.
++   *
+    * @param clientId The identifier for the client
+-   * @param msg The error message about why the connection should be canceled
++   * @param failure The error about why the connection should be canceled
+    */
+-  public void cancelClient(final String clientId, final String msg) {
++  public void cancelClient(final String clientId, final Throwable failure) {
+     final ClientInfo cinfo = pendingClients.remove(clientId);
+     if (cinfo == null) {
+       // Nothing to be done here.
+@@ -207,12 +208,22 @@ public void cancelClient(final String clientId, final String msg) {
+     }
+     cinfo.timeoutFuture.cancel(true);
+     if (!cinfo.promise.isDone()) {
+-      cinfo.promise.setFailure(new RuntimeException(
+-          String.format("Cancel client '%s'. Error: " + msg, clientId)));
++      cinfo.promise.setFailure(failure);
+     }
+   }
+ 
+   /**
++   * Tells the RPC server to cancel the connection from an existing pending client.
++   *
++   * @param clientId The identifier for the client
++   * @param msg The error message about why the connection should be canceled
++   */
++  public void cancelClient(final String clientId, final String msg) {
++    cancelClient(clientId, new RuntimeException(String.format(
++            "Cancelling Remote Spark Driver client connection '%s' with error: " + msg, clientId)));
++  }
++
++  /**
+    * Creates a secret for identifying a client connection.
+    */
+   public String createSecret() {
+-- 
+1.7.9.5
+

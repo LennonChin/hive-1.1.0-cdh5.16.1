@@ -1,0 +1,54 @@
+From 0d7514a8c902fb4879d8b1a6b97e5041fb0ca097 Mon Sep 17 00:00:00 2001
+From: Karthik Manamcheri <karthik@cloudera.com>
+Date: Mon, 1 Oct 2018 11:34:56 -0500
+Subject: [PATCH 1425/1431] CDH-73403: HIVE-10296: Cast exception observed
+ when hive runs a multi join query on metastore
+ (postgres), since postgres pushes the filter into
+ the join, and ignores the condition before
+ applying cast (Karthik Manamcheri, reviewed by
+ Sergey Shelukhin)
+
+==C5_APPROVED_BUGFIX==
+
+(cherry picked from commit c05733e3d624de79803cd155128cd9d6b573caf2)
+
+This change also includes code changes to detect PostgreSQL.
+
+Change-Id: Ic6f071a3c84d19c37df96ec87e774f694325cba6
+---
+ .../hadoop/hive/metastore/MetaStoreDirectSql.java  |    5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreDirectSql.java b/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreDirectSql.java
+index 0314a85..bf50f23 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreDirectSql.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/MetaStoreDirectSql.java
+@@ -93,6 +93,7 @@
+     ORACLE,
+     MSSQL,
+     DERBY,
++    POSTGRES,
+     OTHER
+   }
+ 
+@@ -159,6 +160,8 @@ private DB determineDbType() {
+         dbType = DB.MSSQL;
+       } else if (productName.contains("derby")) {
+         dbType = DB.DERBY;
++      } else if (productName.contains("postgresql")) {
++        dbType = DB.POSTGRES;
+       }
+     }
+     return dbType;
+@@ -430,7 +433,7 @@ public Database getDatabase(String dbName) throws MetaException{
+   public boolean generateSqlFilterForPushdown(
+       Table table, ExpressionTree tree, SqlFilterForPushdown result) throws MetaException {
+     // Derby and Oracle do not interpret filters ANSI-properly in some cases and need a workaround.
+-    boolean dbHasJoinCastBug = (dbType == DB.DERBY || dbType == DB.ORACLE);
++    boolean dbHasJoinCastBug = (dbType == DB.DERBY || dbType == DB.ORACLE || dbType == DB.POSTGRES);
+     result.table = table;
+     result.filter = PartitionFilterGenerator.generateSqlFilter(
+         table, tree, result.params, result.joins, dbHasJoinCastBug, defaultPartName, dbType);
+-- 
+1.7.9.5
+

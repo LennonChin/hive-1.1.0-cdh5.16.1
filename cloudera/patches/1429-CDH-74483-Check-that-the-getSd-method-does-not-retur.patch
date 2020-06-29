@@ -1,0 +1,33 @@
+From 50e6518d4c440dc51f09139c797b48cea9715681 Mon Sep 17 00:00:00 2001
+From: Sergio Pena <sergio.pena@cloudera.com>
+Date: Tue, 23 Oct 2018 14:58:31 -0500
+Subject: [PATCH 1429/1431] CDH-74483: Check that the getSd() method does not
+ return null
+
+This check was removed accidentially by CDH-74483.
+
+==C5_FEATURE_FGP==
+
+Change-Id: I5294e0000b5d3a0e17f69fdcb5bceb7010a6ac4a
+---
+ .../hcatalog/listener/DbNotificationListener.java  |    4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/listener/DbNotificationListener.java b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/listener/DbNotificationListener.java
+index 5bec504..892cc9f 100644
+--- a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/listener/DbNotificationListener.java
++++ b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/listener/DbNotificationListener.java
+@@ -158,6 +158,10 @@ public void onAlterTable (AlterTableEvent tableEvent) throws MetaException {
+       return;
+     }
+ 
++    if (before.getSd() == null || after.getSd() == null) {
++      return;
++    }
++
+     // Only check for null locations if it is not a view
+     if (!isVirtualView(before) && before.getSd().getLocation() == null) {
+       return;
+-- 
+1.7.9.5
+

@@ -1,0 +1,48 @@
+From d8f559cde803ca5b2adffe32f0d227a6048934fc Mon Sep 17 00:00:00 2001
+From: Sergio Pena <sergio.pena@cloudera.com>
+Date: Tue, 12 Jun 2018 11:21:49 -0500
+Subject: [PATCH 1398/1431] CDH-69308: Allow DbNotificationListener to persist
+ events when Object owners change
+
+==C5_FEATURE_FGP==
+
+Change-Id: I220caf20a5f53c6439b95352ff2acceecdbf8d9e
+---
+ .../hcatalog/listener/DbNotificationListener.java  |    7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/listener/DbNotificationListener.java b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/listener/DbNotificationListener.java
+index 122597c..b84736f 100644
+--- a/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/listener/DbNotificationListener.java
++++ b/hcatalog/server-extensions/src/main/java/org/apache/hive/hcatalog/listener/DbNotificationListener.java
+@@ -20,6 +20,7 @@
+ import org.apache.commons.logging.Log;
+ import org.apache.commons.logging.LogFactory;
+ import org.apache.hadoop.hive.metastore.HiveMetaStore;
++import org.apache.commons.lang.StringUtils;
+ import org.apache.hadoop.hive.metastore.api.Function;
+ import org.apache.hadoop.hive.metastore.api.Index;
+ import org.apache.hadoop.hive.metastore.events.AddIndexEvent;
+@@ -149,7 +150,7 @@ public void onAlterTable (AlterTableEvent tableEvent) throws MetaException {
+     Table before = tableEvent.getOldTable();
+     Table after = tableEvent.getNewTable();
+ 
+-    // Verify whether either the name of the db or table changed or location changed.
++    // Verify whether either the name of the db, the name of the table, the location or the object owner changed.
+     if (before.getDbName() == null || after.getDbName() == null ||
+         before.getTableName() == null || after.getTableName() == null) {
+       return;
+@@ -165,7 +166,9 @@ public void onAlterTable (AlterTableEvent tableEvent) throws MetaException {
+ 
+     if (before.getDbName().equals(after.getDbName()) &&
+         before.getTableName().equals(after.getTableName()) &&
+-        before.getSd().getLocation().equals(after.getSd().getLocation())) {
++        before.getSd().getLocation().equals(after.getSd().getLocation()) &&
++        before.getOwnerType() == after.getOwnerType() &&
++        StringUtils.equals(before.getOwner(), after.getOwner())) {
+       // Nothing interesting changed
+       return;
+     }
+-- 
+1.7.9.5
+

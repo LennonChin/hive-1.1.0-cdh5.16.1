@@ -1,0 +1,104 @@
+From 5fe2cd9af82e3d6b593960891c967784fc04f931 Mon Sep 17 00:00:00 2001
+From: Xuefu Zhang <xuefu@uber.com>
+Date: Thu, 5 Jan 2017 10:56:02 -0800
+Subject: [PATCH 1335/1431] CDH-58655: HIVE-15543: Don't try to get
+ memory/cores to decide parallelism when Spark
+ dynamic allocation is enabled (Reviewed by Rui)
+
+(cherry picked from commit ccc9bf3eaadadcbb3c93faa4a9ccc0e20c41dc28)
+
+Conflicts:
+	ql/src/java/org/apache/hadoop/hive/ql/optimizer/spark/SetSparkReducerParallelism.java
+
+Change-Id: Ie501f0cbcbe1f411ac882284930b34a6d957262f
+---
+ .../spark/SetSparkReducerParallelism.java          |   56 ++++++++++++--------
+ 1 file changed, 33 insertions(+), 23 deletions(-)
+
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/optimizer/spark/SetSparkReducerParallelism.java b/ql/src/java/org/apache/hadoop/hive/ql/optimizer/spark/SetSparkReducerParallelism.java
+index f9ef474..03ded75 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/optimizer/spark/SetSparkReducerParallelism.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/optimizer/spark/SetSparkReducerParallelism.java
+@@ -51,6 +51,8 @@
+ 
+   private static final Log LOG = LogFactory.getLog(SetSparkReducerParallelism.class.getName());
+ 
++  private static final String SPARK_DYNAMIC_ALLOCATION_ENABLED = "spark.dynamicAllocation.enabled";
++
+   // Spark memory per task, and total number of cores
+   private ObjectPair<Long, Integer> sparkMemoryAndCores;
+ 
+@@ -107,34 +109,12 @@ public Object process(Node nd, Stack<Node> stack,
+           }
+         }
+ 
+-        if (sparkMemoryAndCores == null) {
+-          SparkSessionManager sparkSessionManager = null;
+-          SparkSession sparkSession = null;
+-          try {
+-            sparkSessionManager = SparkSessionManagerImpl.getInstance();
+-            sparkSession = SparkUtilities.getSparkSession(
+-              context.getConf(), sparkSessionManager);
+-            sparkMemoryAndCores = sparkSession.getMemoryAndCores();
+-          } catch (HiveException e) {
+-            throw new SemanticException("Failed to get a spark session: " + e);
+-          } catch (Exception e) {
+-            LOG.warn("Failed to get spark memory/core info", e);
+-          } finally {
+-            if (sparkSession != null && sparkSessionManager != null) {
+-              try {
+-                sparkSessionManager.returnSession(sparkSession);
+-              } catch (HiveException ex) {
+-                LOG.error("Failed to return the session to SessionManager: " + ex, ex);
+-              }
+-            }
+-          }
+-        }
+-
+         // Divide it by 2 so that we can have more reducers
+         long bytesPerReducer = context.getConf().getLongVar(HiveConf.ConfVars.BYTESPERREDUCER) / 2;
+         int numReducers = Utilities.estimateReducers(numberOfBytes, bytesPerReducer,
+             maxReducers, false);
+ 
++        getSparkMemoryAndCores(context);
+         if (sparkMemoryAndCores != null &&
+             sparkMemoryAndCores.getFirst() > 0 && sparkMemoryAndCores.getSecond() > 0) {
+           // warn the user if bytes per reducer is much larger than memory per task
+@@ -158,4 +138,34 @@ public Object process(Node nd, Stack<Node> stack,
+     return false;
+   }
+ 
++  private void getSparkMemoryAndCores(OptimizeSparkProcContext context) throws SemanticException {
++    if (context.getConf().getBoolean(SPARK_DYNAMIC_ALLOCATION_ENABLED, false)) {
++      // If dynamic allocation is enabled, numbers for memory and cores are meaningless. So, we don't
++      // try to get it.
++      sparkMemoryAndCores = null;
++      return;
++    }
++
++    SparkSessionManager sparkSessionManager = null;
++    SparkSession sparkSession = null;
++    try {
++      sparkSessionManager = SparkSessionManagerImpl.getInstance();
++      sparkSession = SparkUtilities.getSparkSession(
++          context.getConf(), sparkSessionManager);
++      sparkMemoryAndCores = sparkSession.getMemoryAndCores();
++    } catch (HiveException e) {
++      throw new SemanticException("Failed to get a spark session: " + e);
++    } catch (Exception e) {
++      LOG.warn("Failed to get spark memory/core info", e);
++    } finally {
++      if (sparkSession != null && sparkSessionManager != null) {
++        try {
++          sparkSessionManager.returnSession(sparkSession);
++        } catch (HiveException ex) {
++          LOG.error("Failed to return the session to SessionManager: " + ex, ex);
++        }
++      }
++    }
++  }
++
+ }
+-- 
+1.7.9.5
+

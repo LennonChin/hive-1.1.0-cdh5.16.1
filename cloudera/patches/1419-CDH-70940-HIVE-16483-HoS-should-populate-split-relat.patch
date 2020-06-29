@@ -1,0 +1,67 @@
+From e35513862244fc5aba0fad36020dd26a08f72cf1 Mon Sep 17 00:00:00 2001
+From: Chao Sun <sunchao@apache.org>
+Date: Mon, 24 Apr 2017 09:56:02 -0700
+Subject: [PATCH 1419/1431] CDH-70940: HIVE-16483: HoS should populate split
+ related configurations to HiveConf (Chao Sun,
+ reviewed by Xuefu Zhang)
+
+==C5_APPROVED_BUGFIX==
+
+(cherry picked from commit 22c77c1c2a438309df525f76d8b93094cbfe5097)
+(cherry picked from commit 26dd70e2074d1878f0d7962fc3b9c782803eca7e)
+
+Conflicts:
+	ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkPlanGenerator.java
+
+Change-Id: Ia7eb33cba05a033fa8c2b05c9a1e956451731fe2
+---
+ .../hive/ql/exec/spark/SparkPlanGenerator.java     |   23 +++++++++++++++++---
+ 1 file changed, 20 insertions(+), 3 deletions(-)
+
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkPlanGenerator.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkPlanGenerator.java
+index a9bbef7..b039b7c 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkPlanGenerator.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkPlanGenerator.java
+@@ -273,12 +273,13 @@ private JobConf cloneJobConf(BaseWork work) throws Exception {
+       throw new IllegalArgumentException(msg, e);
+     }
+     if (work instanceof MapWork) {
++      MapWork mapWork = (MapWork) work;
+       cloned.setBoolean("mapred.task.is.map", true);
+-      List<Path> inputPaths = Utilities.getInputPaths(cloned, (MapWork) work,
++      List<Path> inputPaths = Utilities.getInputPaths(cloned, mapWork,
+           scratchDir, context, false);
+       Utilities.setInputPaths(cloned, inputPaths);
+-      Utilities.setMapWork(cloned, (MapWork) work, scratchDir, false);
+-      Utilities.createTmpDirs(cloned, (MapWork) work);
++      Utilities.setMapWork(cloned, mapWork, scratchDir, false);
++      Utilities.createTmpDirs(cloned, mapWork);
+       if (work instanceof MergeFileWork) {
+         MergeFileWork mergeFileWork = (MergeFileWork) work;
+         cloned.set(Utilities.MAPRED_MAPPER_CLASS, MergeFileMapper.class.getName());
+@@ -288,6 +289,22 @@ private JobConf cloneJobConf(BaseWork work) throws Exception {
+       } else {
+         cloned.set(Utilities.MAPRED_MAPPER_CLASS, ExecMapper.class.getName());
+       }
++      if (mapWork.getMaxSplitSize() != null) {
++        HiveConf.setLongVar(cloned, HiveConf.ConfVars.MAPREDMAXSPLITSIZE,
++            mapWork.getMaxSplitSize());
++      }
++      if (mapWork.getMinSplitSize() != null) {
++        HiveConf.setLongVar(cloned, HiveConf.ConfVars.MAPREDMINSPLITSIZE,
++            mapWork.getMinSplitSize());
++      }
++      if (mapWork.getMinSplitSizePerNode() != null) {
++        HiveConf.setLongVar(cloned, HiveConf.ConfVars.MAPREDMINSPLITSIZEPERNODE,
++            mapWork.getMinSplitSizePerNode());
++      }
++      if (mapWork.getMinSplitSizePerRack() != null) {
++        HiveConf.setLongVar(cloned, HiveConf.ConfVars.MAPREDMINSPLITSIZEPERRACK,
++            mapWork.getMinSplitSizePerRack());
++      }
+       // remember the JobConf cloned for each MapWork, so we won't clone for it again
+       workToJobConf.put(work, cloned);
+     } else if (work instanceof ReduceWork) {
+-- 
+1.7.9.5
+

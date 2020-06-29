@@ -1,0 +1,68 @@
+From 0d9da66d4ec4c6e6054e1c436d8381ea0b903971 Mon Sep 17 00:00:00 2001
+From: Adam Holley <aholley@cloudera.com>
+Date: Wed, 21 Nov 2018 15:15:20 -0600
+Subject: [PATCH 1431/1431] CDH-75798: Hive upgrade to 5.16.1 fails
+
+These files were incorrectly changed for 5.16.1. No schema changes
+are required for 5.16.1, only for 5.16.0 so these files should
+correctly reflect that.
+
+==C5_APPROVED_BUGFIX==
+
+Change-Id: I44200c26894cafe4ca7ad024f4c02acbbf655783
+---
+ .../scripts/upgrade/derby/cdh.upgrade.order.derby  |    2 +-
+ .../scripts/upgrade/mssql/cdh.upgrade.order.mssql  |    2 +-
+ .../scripts/upgrade/mysql/cdh.upgrade.order.mysql  |    2 +-
+ .../upgrade/oracle/cdh.upgrade.order.oracle        |    2 +-
+ .../upgrade/postgres/cdh.upgrade.order.postgres    |    2 +-
+ 5 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/metastore/scripts/upgrade/derby/cdh.upgrade.order.derby b/metastore/scripts/upgrade/derby/cdh.upgrade.order.derby
+index e1057ac..c3bc238 100644
+--- a/metastore/scripts/upgrade/derby/cdh.upgrade.order.derby
++++ b/metastore/scripts/upgrade/derby/cdh.upgrade.order.derby
+@@ -1,2 +1,2 @@
+ 1.1.0-to-1.1.0-cdh5.12.0
+-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.1
+\ No newline at end of file
++1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0
+diff --git a/metastore/scripts/upgrade/mssql/cdh.upgrade.order.mssql b/metastore/scripts/upgrade/mssql/cdh.upgrade.order.mssql
+index e1057ac..c3bc238 100644
+--- a/metastore/scripts/upgrade/mssql/cdh.upgrade.order.mssql
++++ b/metastore/scripts/upgrade/mssql/cdh.upgrade.order.mssql
+@@ -1,2 +1,2 @@
+ 1.1.0-to-1.1.0-cdh5.12.0
+-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.1
+\ No newline at end of file
++1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0
+diff --git a/metastore/scripts/upgrade/mysql/cdh.upgrade.order.mysql b/metastore/scripts/upgrade/mysql/cdh.upgrade.order.mysql
+index e1057ac..c3bc238 100644
+--- a/metastore/scripts/upgrade/mysql/cdh.upgrade.order.mysql
++++ b/metastore/scripts/upgrade/mysql/cdh.upgrade.order.mysql
+@@ -1,2 +1,2 @@
+ 1.1.0-to-1.1.0-cdh5.12.0
+-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.1
+\ No newline at end of file
++1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0
+diff --git a/metastore/scripts/upgrade/oracle/cdh.upgrade.order.oracle b/metastore/scripts/upgrade/oracle/cdh.upgrade.order.oracle
+index e1057ac..c3bc238 100644
+--- a/metastore/scripts/upgrade/oracle/cdh.upgrade.order.oracle
++++ b/metastore/scripts/upgrade/oracle/cdh.upgrade.order.oracle
+@@ -1,2 +1,2 @@
+ 1.1.0-to-1.1.0-cdh5.12.0
+-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.1
+\ No newline at end of file
++1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0
+diff --git a/metastore/scripts/upgrade/postgres/cdh.upgrade.order.postgres b/metastore/scripts/upgrade/postgres/cdh.upgrade.order.postgres
+index e1057ac..c3bc238 100644
+--- a/metastore/scripts/upgrade/postgres/cdh.upgrade.order.postgres
++++ b/metastore/scripts/upgrade/postgres/cdh.upgrade.order.postgres
+@@ -1,2 +1,2 @@
+ 1.1.0-to-1.1.0-cdh5.12.0
+-1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.1
+\ No newline at end of file
++1.1.0-cdh5.12.0-to-1.1.0-cdh5.16.0
+-- 
+1.7.9.5
+

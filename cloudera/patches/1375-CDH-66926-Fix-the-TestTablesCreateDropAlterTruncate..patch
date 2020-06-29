@@ -1,0 +1,42 @@
+From 4ecf7a6bdb3b4c7f2ddce99f254508718ffa1baa Mon Sep 17 00:00:00 2001
+From: Marta Kuczora <kuczoram@cloudera.com>
+Date: Wed, 4 Apr 2018 18:21:23 +0200
+Subject: [PATCH 1375/1431] CDH-66926: Fix the
+ TestTablesCreateDropAlterTruncate.testAlterTableInvalidStorageDescriptorNullLocation
+ test Previously a NPE occurred when the location
+ was null. With reverting HIVE-6727 this NPE
+ doesn't occur any more and the location of the
+ table can be altered to null.
+
+Change-Id: I7f3a7aa1c93c002421b0ede3b58857696e3e20a9
+---
+ .../client/TestTablesCreateDropAlterTruncate.java  |    7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/metastore/src/test/org/apache/hadoop/hive/metastore/client/TestTablesCreateDropAlterTruncate.java b/metastore/src/test/org/apache/hadoop/hive/metastore/client/TestTablesCreateDropAlterTruncate.java
+index 1d65395..e5c876a 100644
+--- a/metastore/src/test/org/apache/hadoop/hive/metastore/client/TestTablesCreateDropAlterTruncate.java
++++ b/metastore/src/test/org/apache/hadoop/hive/metastore/client/TestTablesCreateDropAlterTruncate.java
+@@ -1014,13 +1014,18 @@ public void testAlterTableInvalidStorageDescriptorNullColumnType() throws Except
+     client.alter_table(originalTable.getDbName(), originalTable.getTableName(), newTable);
+   }
+ 
+-  @Test(expected = MetaException.class)
++  @Test
+   public void testAlterTableInvalidStorageDescriptorNullLocation() throws Exception {
+     Table originalTable = testTables[0];
+     Table newTable = originalTable.deepCopy();
+     newTable.getSd().setLocation(null);
+ 
+     client.alter_table(originalTable.getDbName(), originalTable.getTableName(), newTable);
++    Table alteredTable = client.getTable(originalTable.getDbName(), originalTable.getTableName());
++    // TODO: Previously a NPE occurred when the location was null. With reverting HIVE-6727 this NPE
++    // doesn't occur any more. The table location can be altered to null. Check if this behaviour
++    // is correct or not.
++    Assert.assertNull(alteredTable.getSd().getLocation());
+   }
+ 
+   @Test(expected = InvalidOperationException.class)
+-- 
+1.7.9.5
+

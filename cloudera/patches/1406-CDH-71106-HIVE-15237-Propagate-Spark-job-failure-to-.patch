@@ -1,0 +1,144 @@
+From 51c9c0816cfa878cce1f5e9e7c9c0a04480cd31f Mon Sep 17 00:00:00 2001
+From: Rui Li <lirui@apache.org>
+Date: Thu, 24 Nov 2016 16:26:18 +0800
+Subject: [PATCH 1406/1431] CDH-71106: HIVE-15237: Propagate Spark job failure
+ to Hive (Rui reviewed by Xuefu)
+
+==C5_APPROVED_BUGFIX==
+
+(cherry picked from commit 8fd76707958db9dbd787487d074739c97e875963)
+(cherry picked from commit b0ab56fa3c0695130d02348f4a1626c5f8e63013)
+
+Conflicts:
+	ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/LocalSparkJobStatus.java
+
+Change-Id: Idadaef7ba4a9b26be3451229bc91653ad79ae303
+---
+ .../exec/spark/status/RemoteSparkJobMonitor.java   |   24 +++++++++++++++++++-
+ .../hive/ql/exec/spark/status/SparkJobStatus.java  |    2 ++
+ .../spark/status/impl/LocalSparkJobStatus.java     |   12 ++++++++++
+ .../spark/status/impl/RemoteSparkJobStatus.java    |    5 ++++
+ .../org/apache/hive/spark/client/JobHandle.java    |    5 ++++
+ .../apache/hive/spark/client/JobHandleImpl.java    |    5 ++++
+ 6 files changed, 52 insertions(+), 1 deletion(-)
+
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java
+index 75405fa..5d00454 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/RemoteSparkJobMonitor.java
+@@ -113,7 +113,29 @@ public int startMonitor() {
+           done = true;
+           break;
+         case FAILED:
+-          console.printError("Status: Failed");
++          String detail = sparkJobStatus.getError().getMessage();
++          StringBuilder errBuilder = new StringBuilder();
++          errBuilder.append("Job failed with ");
++          if (detail == null) {
++            errBuilder.append("UNKNOWN reason");
++          } else {
++            // We SerDe the Throwable as String, parse it for the root cause
++            final String CAUSE_CAPTION = "Caused by: ";
++            int index = detail.lastIndexOf(CAUSE_CAPTION);
++            if (index != -1) {
++              String rootCause = detail.substring(index + CAUSE_CAPTION.length());
++              index = rootCause.indexOf(System.getProperty("line.separator"));
++              if (index != -1) {
++                errBuilder.append(rootCause.substring(0, index));
++              } else {
++                errBuilder.append(rootCause);
++              }
++            } else {
++              errBuilder.append(detail);
++            }
++            detail = System.getProperty("line.separator") + detail;
++          }
++          console.printError(errBuilder.toString(), detail);
+           running = false;
+           done = true;
+           rc = 3;
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/SparkJobStatus.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/SparkJobStatus.java
+index 7959089..72ce439 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/SparkJobStatus.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/SparkJobStatus.java
+@@ -44,4 +44,6 @@
+   SparkStatistics getSparkStatistics();
+ 
+   void cleanup();
++
++  Throwable getError();
+ }
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/LocalSparkJobStatus.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/LocalSparkJobStatus.java
+index 3f62df7..06bcdff 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/LocalSparkJobStatus.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/LocalSparkJobStatus.java
+@@ -232,6 +232,18 @@ public void cleanup() {
+     return results;
+   }
+ 
++  @Override
++  public Throwable getError() {
++    if (future.isDone()) {
++      try {
++        future.get();
++      } catch (Throwable e) {
++        return e;
++      }
++    }
++    return null;
++  }
++
+   private SparkJobInfo getJobInfo() {
+     return sparkContext.statusTracker().getJobInfo(jobId);
+   }
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/RemoteSparkJobStatus.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/RemoteSparkJobStatus.java
+index 1d1227a..fa7b222 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/RemoteSparkJobStatus.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/status/impl/RemoteSparkJobStatus.java
+@@ -138,6 +138,11 @@ public void cleanup() {
+ 
+   }
+ 
++  @Override
++  public Throwable getError() {
++    return jobHandle.getError();
++  }
++
+   private SparkJobInfo getSparkJobInfo() throws HiveException {
+     Integer sparkJobId = jobHandle.getSparkJobIds().size() == 1
+       ? jobHandle.getSparkJobIds().get(0) : null;
+diff --git a/spark-client/src/main/java/org/apache/hive/spark/client/JobHandle.java b/spark-client/src/main/java/org/apache/hive/spark/client/JobHandle.java
+index c02c403..dffd60c 100644
+--- a/spark-client/src/main/java/org/apache/hive/spark/client/JobHandle.java
++++ b/spark-client/src/main/java/org/apache/hive/spark/client/JobHandle.java
+@@ -61,6 +61,11 @@
+   State getState();
+ 
+   /**
++   * Return the error if the job has failed.
++   */
++  Throwable getError();
++
++  /**
+    * The current state of the submitted job.
+    */
+   static enum State {
+diff --git a/spark-client/src/main/java/org/apache/hive/spark/client/JobHandleImpl.java b/spark-client/src/main/java/org/apache/hive/spark/client/JobHandleImpl.java
+index 7645702..2881252 100644
+--- a/spark-client/src/main/java/org/apache/hive/spark/client/JobHandleImpl.java
++++ b/spark-client/src/main/java/org/apache/hive/spark/client/JobHandleImpl.java
+@@ -128,6 +128,11 @@ public State getState() {
+     return state;
+   }
+ 
++  @Override
++  public Throwable getError() {
++    return promise.cause();
++  }
++
+   public void setSparkCounters(SparkCounters sparkCounters) {
+     this.sparkCounters = sparkCounters;
+   }
+-- 
+1.7.9.5
+

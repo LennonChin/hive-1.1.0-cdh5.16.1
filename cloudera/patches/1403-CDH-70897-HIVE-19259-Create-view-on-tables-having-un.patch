@@ -1,0 +1,93 @@
+From 4179eebc27a9f40418b1d608e00bba05839214c7 Mon Sep 17 00:00:00 2001
+From: Yongzhi Chen <ychen@cloudera.com>
+Date: Tue, 24 Jul 2018 16:44:00 -0400
+Subject: [PATCH 1403/1431] CDH-70897: HIVE-19259: Create view on tables
+ having union all fail with 'Table not found' (fix
+ more tests) ==C5_APPROVED_BUGFIX== Change-Id:
+ I4c90d48af0b3e40149541d8c63deb156895e2ef0
+
+---
+ .../clientpositive/ql_rewrite_gbtoidx.q.out        |    2 +-
+ .../clientpositive/ql_rewrite_gbtoidx_cbo_1.q.out  |    2 +-
+ .../clientpositive/ql_rewrite_gbtoidx_cbo_2.q.out  |    4 ++--
+ .../clientpositive/spark/ql_rewrite_gbtoidx.q.out  |    2 +-
+ .../spark/ql_rewrite_gbtoidx_cbo_1.q.out           |    2 +-
+ 5 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/ql/src/test/results/clientpositive/ql_rewrite_gbtoidx.q.out b/ql/src/test/results/clientpositive/ql_rewrite_gbtoidx.q.out
+index ddba8ee..d25abd0 100644
+--- a/ql/src/test/results/clientpositive/ql_rewrite_gbtoidx.q.out
++++ b/ql/src/test/results/clientpositive/ql_rewrite_gbtoidx.q.out
+@@ -900,7 +900,7 @@ STAGE PLANS:
+     Map Reduce
+       Map Operator Tree:
+           TableScan
+-            alias: null-subquery1:dummy-subquery1:default__lineitem_ix_lineitem_ix_lshipdate_idx__
++            alias: dummy-subquery1:default__lineitem_ix_lineitem_ix_lshipdate_idx__
+             Statistics: Num rows: 95 Data size: 8960 Basic stats: COMPLETE Column stats: NONE
+             Select Operator
+               expressions: l_shipdate (type: string), _count_of_l_shipdate (type: bigint)
+diff --git a/ql/src/test/results/clientpositive/ql_rewrite_gbtoidx_cbo_1.q.out b/ql/src/test/results/clientpositive/ql_rewrite_gbtoidx_cbo_1.q.out
+index af3083b..edf4312 100644
+--- a/ql/src/test/results/clientpositive/ql_rewrite_gbtoidx_cbo_1.q.out
++++ b/ql/src/test/results/clientpositive/ql_rewrite_gbtoidx_cbo_1.q.out
+@@ -900,7 +900,7 @@ STAGE PLANS:
+     Map Reduce
+       Map Operator Tree:
+           TableScan
+-            alias: null-subquery1:$hdt$_0-subquery1:$hdt$_0:$hdt$_0:default__lineitem_ix_lineitem_ix_lshipdate_idx__
++            alias: $hdt$_0-subquery1:$hdt$_0:$hdt$_0:default__lineitem_ix_lineitem_ix_lshipdate_idx__
+             Statistics: Num rows: 95 Data size: 8960 Basic stats: COMPLETE Column stats: NONE
+             Select Operator
+               expressions: l_shipdate (type: string), _count_of_l_shipdate (type: bigint)
+diff --git a/ql/src/test/results/clientpositive/ql_rewrite_gbtoidx_cbo_2.q.out b/ql/src/test/results/clientpositive/ql_rewrite_gbtoidx_cbo_2.q.out
+index c437ed8..27f6368 100644
+--- a/ql/src/test/results/clientpositive/ql_rewrite_gbtoidx_cbo_2.q.out
++++ b/ql/src/test/results/clientpositive/ql_rewrite_gbtoidx_cbo_2.q.out
+@@ -3400,7 +3400,7 @@ STAGE PLANS:
+     Map Reduce
+       Map Operator Tree:
+           TableScan
+-            alias: $hdt$_0-subquery1:$hdt$_0-subquery1:$hdt$_0:$hdt$_0:default__lineitem_ix_lineitem_ix_l_orderkey_idx__
++            alias: $hdt$_0:$hdt$_0-subquery1:$hdt$_0:$hdt$_0:default__lineitem_ix_lineitem_ix_l_orderkey_idx__
+             Statistics: Num rows: 26 Data size: 2604 Basic stats: COMPLETE Column stats: NONE
+             Filter Operator
+               predicate: (l_orderkey < 7) (type: boolean)
+@@ -3491,7 +3491,7 @@ STAGE PLANS:
+     Map Reduce
+       Map Operator Tree:
+           TableScan
+-            alias: $hdt$_0-subquery2:$hdt$_0-subquery2:$hdt$_0:$hdt$_0:default__lineitem_ix_lineitem_ix_l_partkey_idx__
++            alias: $hdt$_0:$hdt$_0-subquery2:$hdt$_0:$hdt$_0:default__lineitem_ix_lineitem_ix_l_partkey_idx__
+             Statistics: Num rows: 100 Data size: 8937 Basic stats: COMPLETE Column stats: NONE
+             Filter Operator
+               predicate: (l_partkey < 10) (type: boolean)
+diff --git a/ql/src/test/results/clientpositive/spark/ql_rewrite_gbtoidx.q.out b/ql/src/test/results/clientpositive/spark/ql_rewrite_gbtoidx.q.out
+index 25d247a..8448356 100644
+--- a/ql/src/test/results/clientpositive/spark/ql_rewrite_gbtoidx.q.out
++++ b/ql/src/test/results/clientpositive/spark/ql_rewrite_gbtoidx.q.out
+@@ -912,7 +912,7 @@ STAGE PLANS:
+         Map 2 
+             Map Operator Tree:
+                 TableScan
+-                  alias: null-subquery1:dummy-subquery1:default__lineitem_ix_lineitem_ix_lshipdate_idx__
++                  alias: dummy-subquery1:default__lineitem_ix_lineitem_ix_lshipdate_idx__
+                   Statistics: Num rows: 95 Data size: 8960 Basic stats: COMPLETE Column stats: NONE
+                   Select Operator
+                     expressions: l_shipdate (type: string), _count_of_l_shipdate (type: bigint)
+diff --git a/ql/src/test/results/clientpositive/spark/ql_rewrite_gbtoidx_cbo_1.q.out b/ql/src/test/results/clientpositive/spark/ql_rewrite_gbtoidx_cbo_1.q.out
+index f23d759..f4075ef 100644
+--- a/ql/src/test/results/clientpositive/spark/ql_rewrite_gbtoidx_cbo_1.q.out
++++ b/ql/src/test/results/clientpositive/spark/ql_rewrite_gbtoidx_cbo_1.q.out
+@@ -912,7 +912,7 @@ STAGE PLANS:
+         Map 2 
+             Map Operator Tree:
+                 TableScan
+-                  alias: null-subquery1:dummy-subquery1:default__lineitem_ix_lineitem_ix_lshipdate_idx__
++                  alias: dummy-subquery1:default__lineitem_ix_lineitem_ix_lshipdate_idx__
+                   Statistics: Num rows: 95 Data size: 8960 Basic stats: COMPLETE Column stats: NONE
+                   Select Operator
+                     expressions: l_shipdate (type: string), _count_of_l_shipdate (type: bigint)
+-- 
+1.7.9.5
+

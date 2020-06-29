@@ -1,0 +1,88 @@
+From f6c88d8464edc3cba306156284737a1b5794df1b Mon Sep 17 00:00:00 2001
+From: Xuefu Zhang <xuefu@uber.com>
+Date: Tue, 7 Feb 2017 13:48:55 -0800
+Subject: [PATCH 1390/1431] CDH-58585: HIVE-15682: Eliminate per-row based
+ dummy iterator creation (reviewed by Chao)
+
+(cherry picked from commit 561dbe3b90bc5cd85a64e22ccd9e384bbf67a782)
+(cherry picked from commit bb31ecfabe02996344ca3a1a54a3c60f0e756446)
+(cherry picked from commit 71d8de96a03816110e7360c25611f943d9a201c9)
+
+Change-Id: I6bc7b0b251e4593421f3fe93c28d58ef810c0680
+---
+ .../ql/exec/spark/SparkReduceRecordHandler.java    |   56 ++++++++++++--------
+ 1 file changed, 35 insertions(+), 21 deletions(-)
+
+diff --git a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkReduceRecordHandler.java b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkReduceRecordHandler.java
+index 80c92a0..4bbbfb6 100644
+--- a/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkReduceRecordHandler.java
++++ b/ql/src/java/org/apache/hadoop/hive/ql/exec/spark/SparkReduceRecordHandler.java
+@@ -236,30 +236,44 @@ public void init(JobConf job, OutputCollector output, Reporter reporter) throws
+   }
+ 
+   /**
+-   * TODO: Instead of creating a dummy iterator per row, we can implement a private method that's
+-   * similar to processRow(Object key, Iterator<E> values) but processes one row at a time. Then,
+-   * we just call that private method here.
++   * A reusable dummy iterator that has only one value.
++   *
+    */
+-  @Override
+-  public void processRow(Object key, final Object value) throws IOException {
+-    processRow(key, new Iterator<Object>() {
+-      boolean done = false;
+-      @Override
+-      public boolean hasNext() {
+-        return !done;
+-      }
++  private static class DummyIterator implements Iterator<Object> {
++    private boolean done = false;
++    private Object value = null;
+ 
+-      @Override
+-      public Object next() {
+-        done = true;
+-        return value;
+-      }
++    public void setValue(Object v) {
++      this.value = v;
++      done = false;
++    }
+ 
+-      @Override
+-      public void remove() {
+-        throw new UnsupportedOperationException("Iterator.remove() is not implemented/supported");
+-      }
+-    });
++    @Override
++    public boolean hasNext() {
++      return !done;
++    }
++
++    @Override
++    public Object next() {
++      done = true;
++      return value;
++    }
++
++    @Override
++    public void remove() {
++      throw new UnsupportedOperationException("Iterator.remove() is not implemented/supported");
++    }
++  }
++
++  private DummyIterator dummyIterator = new DummyIterator();
++
++  /**
++   * Process one row using a dummy iterator.
++   */
++  @Override
++  public void processRow(Object key, final Object value) throws IOException {
++    dummyIterator.setValue(value);
++    processRow(key, dummyIterator);
+   }
+ 
+   @Override
+-- 
+1.7.9.5
+

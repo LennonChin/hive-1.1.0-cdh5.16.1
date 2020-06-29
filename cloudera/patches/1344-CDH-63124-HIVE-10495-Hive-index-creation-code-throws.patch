@@ -1,0 +1,41 @@
+From 87e38cf13e1f67f980032a7437ba90af1f863243 Mon Sep 17 00:00:00 2001
+From: Bing Li <sarah.libing@gmail.com>
+Date: Fri, 7 Jul 2017 13:15:38 -0700
+Subject: [PATCH 1344/1431] CDH-63124 HIVE-10495 : Hive index creation code
+ throws NPE if index table is null (Bing Li via
+ Ashutosh Chauhan)
+
+Signed-off-by: Ashutosh Chauhan <hashutosh@apache.org>
+(cherry picked from commit 8b0b83fd57553b4cb52129ff36c398e18230b649)
+
+Change-Id: I90b940775555055ebec862859c09a35432570108
+(cherry picked from commit 7f7096b3e18d3fd866af2ab1e47a41135db6c4d0)
+---
+ .../hadoop/hive/metastore/HiveMetaStore.java       |    4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java b/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java
+index ee4d714..c5d0a6a 100644
+--- a/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java
++++ b/metastore/src/java/org/apache/hadoop/hive/metastore/HiveMetaStore.java
+@@ -4352,7 +4352,8 @@ public boolean drop_partition_by_name_with_environment_context(final String db_n
+     @Override
+     public Index add_index(final Index newIndex, final Table indexTable)
+         throws InvalidObjectException, AlreadyExistsException, MetaException, TException {
+-      startFunction("add_index", ": " + newIndex.toString() + " " + indexTable.toString());
++      String tableName = indexTable != null ? indexTable.getTableName() : "";
++      startFunction("add_index", ": " + newIndex.toString() + " " + tableName);
+       Index ret = null;
+       Exception ex = null;
+       try {
+@@ -4371,7 +4372,6 @@ public Index add_index(final Index newIndex, final Table indexTable)
+           throw newMetaException(e);
+         }
+       } finally {
+-        String tableName = indexTable != null ? indexTable.getTableName() : null;
+         endFunction("add_index", ret != null, ex, tableName);
+       }
+       return ret;
+-- 
+1.7.9.5
+
